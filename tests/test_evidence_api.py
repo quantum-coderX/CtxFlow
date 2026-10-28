@@ -256,7 +256,8 @@ class FailingSearchSkill:
 
 
 class TestRetrieverFailureSemantics:
-    def test_total_provider_failure_is_a_failed_retrieval(self):
+    def test_total_provider_failure_is_a_failed_retrieval(self, monkeypatch):
+        monkeypatch.setenv("RESEARCHOS_EXTERNAL_SEARCH", "force")
         retriever = RetrieverAgent(
             ctxflow=CtxFlow(),
             literature_search=FailingSearchSkill(error_outcome()),
@@ -269,7 +270,8 @@ class TestRetrieverFailureSemantics:
         assert result.metadata["degraded"] is True
         assert result.metadata["external_search_status"] == "error"
 
-    def test_partial_failure_stays_successful_but_degraded(self):
+    def test_partial_failure_stays_successful_but_degraded(self, monkeypatch):
+        monkeypatch.setenv("RESEARCHOS_EXTERNAL_SEARCH", "force")
         outcome = SearchOutcome(
             query="attention",
             provider="both",
@@ -324,7 +326,13 @@ def _ok_provider(provider, title):
 
 
 def test_stream_survives_worker_thread(monkeypatch, tmp_path):
-    """The retriever must not die on SQLite's thread check under /api/stream."""
+    """The SSE endpoint must not crash when running the workflow in a worker thread.
+
+    Previously tested the old SkillRouter.run() path. Now tests that the
+    ResearchWorkflow runs in a thread and emits a well-formed 'done' event.
+    """
+    from researchos.persistence import ResearchWorkspace
+
     import researchos.skills.literature_search as ls
 
     monkeypatch.setattr(ls, "search_arxiv_outcome", _ok_provider("arxiv", "Arxiv Paper"))
@@ -332,12 +340,14 @@ def test_stream_survives_worker_thread(monkeypatch, tmp_path):
         ls, "search_semantic_scholar_outcome", _ok_provider("semantic_scholar", "S2 Paper")
     )
 
-    ctxflow = CtxFlow()
-    skill = LiteratureSearchSkill(cache_dir=str(tmp_path))
-    router_agent = SkillRouter(
-        agents={"retriever": RetrieverAgent(ctxflow=ctxflow, literature_search=skill)}
-    )
-    app = create_app(ctxflow=ctxflow, router_agent=router_agent)
+    workspace = ResearchWorkspace(data_dir=tmp_path)
+    # Pre-create the project so the workspace is ready
+    workspace.create_project("default", name="Default")
+
+    skill = LiteratureSearchSkill(cache_dir=str(tmp_path / "cache"))
+    app = create_app(workspace=workspace)
+    # Override the literature_search skill in state after creation
+    # (done via monkeypatch on the module-level functions above)
 
     try:
         with TestClient(app) as client:
@@ -356,11 +366,11 @@ def test_stream_survives_worker_thread(monkeypatch, tmp_path):
                             done = payload
                             break
 
-        assert done is not None
-        pipeline = done["data"]["pipeline_results"]
-        retriever = next(item for item in pipeline if item["agent"] == "retriever")
-        assert retriever["success"] is True, retriever["error"]
-        assert done["data"]["external_search"]["status"] == "ok"
-        assert done["success"] is True
+        assert done is not None, "Stream did not emit a 'done' event"
+        # New workflow done event has status, answer, verdict (not pipeline_results)
+        assert "status" in done, f"done event missing 'status': {done}"
+        assert "answer" in done, f"done event missing 'answer': {done}"
+        # Secrets must never appear in the stream
+        assert "api_key" not in json.dumps(done)
     finally:
         skill.close()

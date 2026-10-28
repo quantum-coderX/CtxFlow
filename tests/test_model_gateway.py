@@ -275,6 +275,33 @@ class TestCompletion:
         assert usage["failures"] == 0
         assert sleeps == [0.25, 0.5]
 
+    def test_rate_limit_hint_from_message_is_honoured(self):
+        """Groq free tiers report "try again in 18.4s"; sleeping 0.25s is futile."""
+        error = StatusError(
+            429,
+            "Rate limit reached for model in organization on tokens per minute. "
+            "Please try again in 18.397s.",
+        )
+        gateway, _, sleeps = gateway_with([error, response("ok")])
+
+        assert gateway.complete("prompt") == "ok"
+        assert sleeps == [18.397]
+
+    def test_rate_limit_hint_from_header_is_honoured(self):
+        error = StatusError(429, "slow down")
+        error.response = SimpleNamespace(headers={"retry-after": "2.5"})
+        gateway, _, sleeps = gateway_with([error, response("ok")])
+
+        assert gateway.complete("prompt") == "ok"
+        assert sleeps == [2.5]
+
+    def test_rate_limit_hint_is_capped(self):
+        error = StatusError(429, "Please try again in 300s.")
+        gateway, _, sleeps = gateway_with([error, response("ok")])
+
+        assert gateway.complete("prompt") == "ok"
+        assert sleeps == [30.0]
+
     def test_non_retryable_error_fails_immediately(self):
         gateway, _, sleeps = gateway_with([StatusError(401)])
 
@@ -285,6 +312,20 @@ class TestCompletion:
         assert gateway.usage()["retries"] == 0
         assert gateway.usage()["failures"] == 1
         assert sleeps == []
+
+    def test_auth_failure_trips_a_circuit_breaker(self):
+        """An invalid key must not be retried on every later call."""
+        gateway, client, _ = gateway_with([StatusError(401), response("ok")])
+        calls_before = len(client.completions.calls)
+
+        with pytest.raises(ModelCallError):
+            gateway.complete("first")
+
+        # The second call fails fast without touching the provider.
+        with pytest.raises(ModelCallError, match="authentication failure"):
+            gateway.complete("second")
+
+        assert len(client.completions.calls) == calls_before + 1
 
     def test_exhausted_retries_raises_with_attempt_count(self):
         gateway, _, sleeps = gateway_with(
@@ -491,7 +532,12 @@ class TestSynthesisFailurePropagation:
         assert any(alert["type"] == "llm_failure" for alert in body["alerts"])
         assert "synthesis model was unavailable" in body["answer"]
 
-    def test_stream_marks_synthesizer_as_failed(self):
+    def test_stream_degrades_when_synthesizer_fails(self):
+        """A broken model gateway should result in a degraded (not failed) run.
+
+        The new ResearchWorkflow SSE done-event carries status/degraded/errors
+        instead of the old SkillRouter pipeline_results array.
+        """
         app = create_app(model_gateway=BrokenGateway())
         with TestClient(app) as client:
             seed_claim(app)
@@ -511,14 +557,17 @@ class TestSynthesisFailurePropagation:
                             done = payload
                             break
 
-        assert done is not None
-        synthesizer = next(
-            item
-            for item in done["data"]["pipeline_results"]
-            if item["agent"] == "synthesizer"
-        )
-        assert synthesizer["success"] is False
-        assert "Model synthesis failed" in synthesizer["error"]
+        assert done is not None, "Stream did not emit a 'done' event"
+        # A broken model must degrade the answer, not fail the run: the graph
+        # evidence and the verdict are still usable.
+        assert done.get("status") == "degraded"
+        assert done.get("success") is True
+        assert done.get("degraded") is True
+        assert done.get("errors")
+        # Answer must be present (heuristic fallback when LLM fails).
+        assert done.get("answer")
+        # Secrets must not leak into the response.
+        assert "api_key" not in json.dumps(done)
 
 
 # ---------------------------------------------------------------------------

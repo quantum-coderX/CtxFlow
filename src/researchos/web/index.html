@@ -1,123 +1,14 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ResearchOS — Graph-Structured Research Workspace</title>
-  <link rel="stylesheet" href="/styles.css" />
-</head>
-<body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">R</span>
-      <div>
-        <h1>ResearchOS</h1>
-        <p>Multi-agent research assistant with graph memory</p>
-      </div>
-    </div>
-    <div class="topbar-stats" id="stats">
-      <span class="stat"><strong id="stat-nodes">0</strong> nodes</span>
-      <span class="stat"><strong id="stat-edges">0</strong> edges</span>
-      <span class="status-dot" id="health-dot"></span>
-      <span id="health-label">connecting…</span>
-    </div>
-    <label class="project-picker">
-      Project
-      <input id="project-id" value="default" spellcheck="false" />
-    </label>
-  </header>
-
-  <main class="workspace">
-    <section class="panel library" aria-label="Project library">
-      <div class="panel-head">
-        <h2>Library</h2>
-        <button class="ghost" id="refresh-btn" type="button">Refresh</button>
-      </div>
-
-      <details open>
-        <summary>Add paper</summary>
-        <form id="paper-form" class="stack">
-          <input name="title" placeholder="Paper title" required />
-          <input name="authors" placeholder="Authors (comma separated)" />
-          <div class="row">
-            <input name="year" placeholder="Year" type="number" min="1900" max="2100" />
-            <input name="doi" placeholder="DOI (optional)" />
-          </div>
-          <textarea name="abstract" rows="5" placeholder="Abstract or key findings" required></textarea>
-          <button type="submit">Ingest paper</button>
-        </form>
-      </details>
-
-      <details>
-        <summary>Upload PDF</summary>
-        <form id="upload-form" class="stack">
-          <input name="file" type="file" accept="application/pdf" required />
-          <input name="title" placeholder="Title (optional)" />
-          <button type="submit">Parse &amp; ingest</button>
-          <p class="hint">Requires the optional <code>pymupdf</code> extra.</p>
-        </form>
-      </details>
-
-      <details>
-        <summary>Add note</summary>
-        <form id="note-form" class="stack">
-          <input name="title" placeholder="Note title" />
-          <textarea name="content" rows="4" placeholder="Observation, hypothesis, or reminder" required></textarea>
-          <button type="submit">Save note</button>
-        </form>
-      </details>
-
-      <div class="notes-wrap">
-        <h3>Papers</h3>
-        <ul id="papers-list" class="notes-list">
-          <li class="empty">No papers ingested yet.</li>
-        </ul>
-      </div>
-
-      <div class="notes-wrap">
-        <h3>Notes</h3>
-        <ul id="notes-list" class="notes-list">
-          <li class="empty">No notes yet.</li>
-        </ul>
-      </div>
-    </section>
-
-    <section class="panel chat" aria-label="Research chat">
-      <div class="panel-head">
-        <h2>Ask the pipeline</h2>
-        <span class="intent-badge" id="intent-badge" hidden></span>
-      </div>
-      <div class="messages" id="messages">
-        <article class="message assistant">
-          <div class="message-body">
-            Ask a question about your library. Try
-            <em>“What is the verified accuracy of Algorithm X?”</em> or
-            <em>“Trace the provenance of this claim.”</em>
-          </div>
-        </article>
-      </div>
-      <form id="chat-form" class="composer">
-        <textarea id="chat-input" rows="2" placeholder="Ask a research question…" required></textarea>
-        <button type="submit">Send</button>
-      </form>
-    </section>
-
-    <section class="panel graph-panel" aria-label="Knowledge graph and research trace">
-      <div class="panel-head">
-        <h2>Knowledge graph</h2>
-        <span class="hint">Click a node to trace it</span>
-      </div>
-      <svg id="graph" role="img" aria-label="Knowledge graph visualization"></svg>
-      <div class="trace" id="trace-panel">
-        <div class="trace-empty">
-          <h3>Research Trace</h3>
-          <p>Select a node or a citation to inspect supporting evidence, superseded claims, and contradictions.</p>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js" defer></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ResearchOS — AI Research Workspace</title>
+    <meta name="description" content="Multi-agent AI research assistant with graph memory and evidence provenance." />
+    <script type="module" crossorigin src="/assets/index-Bo0-_hA_.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-COFtJaTT.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>

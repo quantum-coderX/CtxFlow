@@ -20,6 +20,7 @@ from ctxflow.memory.store import (
     Subgraph,
     _now,
 )
+from ctxflow.memory.run_events import RunEvent, event_hash, verify_event_chain
 
 
 class InMemoryMemoryStore:
@@ -30,6 +31,7 @@ class InMemoryMemoryStore:
         self.versions: dict[str, list[MemoryVersion]] = {}
         self.edges: dict[tuple[str, str, Relation], Edge] = {}
         self.provenance: dict[str, Provenance] = {}
+        self.run_events: dict[str, list[RunEvent]] = {}
 
     async def add(self, memory: Memory) -> str:
         """Insert a memory and its version-one snapshot idempotently."""
@@ -56,11 +58,13 @@ class InMemoryMemoryStore:
         memory_id: str,
         version: int | None = None,
         as_of: datetime | None = None,
+        *,
+        project_id: str = "default",
     ) -> Memory | None:
         """Return a current or historical snapshot without mutating storage."""
 
         memory = self.memories.get(memory_id)
-        if memory is None:
+        if memory is None or memory.project_id != project_id:
             return None
         if version is None and as_of is None:
             return replace(memory, embedding=list(memory.embedding))
@@ -90,11 +94,12 @@ class InMemoryMemoryStore:
         actor: str,
         *,
         embedding: Sequence[float] | None = None,
+        project_id: str = "default",
     ) -> int:
         """Append a version and update only the memory's current pointer."""
 
         memory = self.memories.get(memory_id)
-        if memory is None:
+        if memory is None or memory.project_id != project_id:
             raise KeyError(f"Unknown memory: {memory_id}")
         next_version = len(self.versions[memory_id]) + 1
         if supersedes_version is not None and supersedes_version != memory.current_version:
@@ -124,6 +129,7 @@ class InMemoryMemoryStore:
         query_text: str,
         k: int,
         *,
+        project_id: str = "default",
         types: Iterable[MemoryType] | None = None,
         include_archived: bool = False,
         include_history: bool = False,
@@ -137,11 +143,18 @@ class InMemoryMemoryStore:
         query_terms = set(re.findall(r"\w+", query_text.lower()))
         candidates: list[tuple[str, float, float]] = []
         for memory in self.memories.values():
+            if memory.project_id != project_id:
+                continue
             if memory.archived and not include_archived:
+                continue
+            if not include_history and memory.validity.value == "superseded":
                 continue
             if allowed_types is not None and memory.memory_type not in allowed_types:
                 continue
-            snapshot = await self.get(memory.id, as_of=as_of) if as_of else memory
+            snapshot = (
+                await self.get(memory.id, as_of=as_of, project_id=project_id)
+                if as_of else memory
+            )
             if snapshot is None:
                 continue
             keyword_score = self._keyword_score(query_terms, snapshot.text)
@@ -165,6 +178,7 @@ class InMemoryMemoryStore:
         self,
         memory_id: str,
         *,
+        project_id: str = "default",
         depth: int,
         relations: Iterable[Relation] | None = None,
         direction: str = "both",
@@ -173,7 +187,10 @@ class InMemoryMemoryStore:
     ) -> Subgraph:
         """Return a bounded BFS subgraph, including the starting memory."""
 
-        if memory_id not in self.memories:
+        if (
+            memory_id not in self.memories
+            or self.memories[memory_id].project_id != project_id
+        ):
             return Subgraph(nodes=[], edges=[])
         if depth < 0 or max_nodes < 1 or fanout_cap < 1:
             raise ValueError("depth must be >= 0 and graph limits must be >= 1")
@@ -201,12 +218,23 @@ class InMemoryMemoryStore:
                 if neighbor not in distances and len(distances) < max_nodes:
                     distances[neighbor] = distances[current] + 1
                     queue.append(neighbor)
-        nodes = [self.memories[node_id] for node_id in distances]
+        nodes = [
+            self.memories[node_id]
+            for node_id in distances
+            if self.memories[node_id].project_id == project_id
+        ]
         return Subgraph(nodes=nodes, edges=list(selected_edges.values()))
 
-    async def get_version_history(self, memory_id: str) -> list[MemoryVersion]:
+    async def get_version_history(
+        self, memory_id: str, *, project_id: str = "default"
+    ) -> list[MemoryVersion]:
         """Return all immutable versions in ascending version order."""
 
+        if (
+            memory_id not in self.memories
+            or self.memories[memory_id].project_id != project_id
+        ):
+            return []
         return list(self.versions.get(memory_id, []))
 
     async def record_access(self, memory_id: str) -> None:
@@ -223,6 +251,8 @@ class InMemoryMemoryStore:
 
         if edge.src not in self.memories or edge.dst not in self.memories:
             raise KeyError("Both edge endpoints must exist in the memory store")
+        if self.memories[edge.src].project_id != self.memories[edge.dst].project_id:
+            raise ValueError("Memory edges cannot cross project boundaries")
         self.edges[(edge.src, edge.dst, edge.relation)] = edge
 
     async def add_provenance(self, provenance: Provenance) -> None:
@@ -231,6 +261,48 @@ class InMemoryMemoryStore:
         if provenance.memory_id not in self.memories:
             raise KeyError(f"Unknown memory: {provenance.memory_id}")
         self.provenance[provenance.memory_id] = provenance
+
+    async def get_provenance(
+        self, memory_id: str, *, project_id: str = "default"
+    ) -> Provenance | None:
+        """Return provenance only when the memory belongs to the requested project."""
+
+        memory = self.memories.get(memory_id)
+        if memory is None or memory.project_id != project_id:
+            return None
+        return self.provenance.get(memory_id)
+
+    async def append_run_event(
+        self,
+        run_id: str,
+        project_id: str,
+        event_type: str,
+        event_data: dict[str, object],
+    ) -> RunEvent:
+        events = self.run_events.setdefault(run_id, [])
+        previous_hash = events[-1].event_hash if events else None
+        item = RunEvent(
+            run_id=run_id,
+            project_id=project_id,
+            sequence=len(events),
+            event_type=event_type,
+            event_data=dict(event_data),
+            previous_hash=previous_hash,
+            event_hash=event_hash(
+                run_id=run_id,
+                project_id=project_id,
+                sequence=len(events),
+                event_type=event_type,
+                event_data=dict(event_data),
+                previous_hash=previous_hash,
+            ),
+            created_at=_now(),
+        )
+        events.append(item)
+        return item
+
+    async def verify_run_event_chain(self, run_id: str) -> bool:
+        return verify_event_chain(self.run_events.get(run_id, []))
 
     @staticmethod
     def _keyword_score(query_terms: set[str], text: str) -> float:

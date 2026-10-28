@@ -115,6 +115,16 @@ class ContextGraph:
         )
         return True
 
+    def remove_edge(self, source_id: str, target_id: str) -> Optional[Edge]:
+        """Remove one directed edge and return its previous value."""
+
+        if not self._g.has_edge(source_id, target_id):
+            return None
+        data = dict(self._g.get_edge_data(source_id, target_id) or {})
+        edge = self._edge_from_data(source_id, target_id, data)
+        self._g.remove_edge(source_id, target_id)
+        return edge
+
     def get_edges_from(self, node_id: str) -> List[Edge]:
         """Return all outgoing edges from *node_id*."""
         if node_id not in self._g:

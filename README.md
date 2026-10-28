@@ -12,6 +12,55 @@ A schema-agnostic, incrementally-built graph memory framework for LLM agents.
 5. **Decoupled Pruning**: Separate maintenance pass supporting `drop` and `summarize` (cluster compaction) strategies based on staleness signals.
 6. **Persistence**: Export and import graphs via JSON or MessagePack binary formats.
 
+## Layer 1 delivery status
+
+The Christo-owned memory work is tracked in
+[`docs/team/CHRISTO.md`](docs/team/CHRISTO.md). The following deliverables are
+implemented and locally verified:
+
+- project-scoped memory records and fail-closed in-memory/PostgreSQL retrieval;
+- atomic supersession and degree-cap regression coverage;
+- optional token-budgeted context adapter and maintenance retention command;
+- offline compaction in [`scripts/compact_graph.py`](scripts/compact_graph.py);
+- the 10,000-node benchmark in
+  [`scripts/bench_graph.py`](scripts/bench_graph.py);
+- a deterministic demo corpus and footprint report in
+  [`scripts/demo_corpus.py`](scripts/demo_corpus.py);
+- additive scope/run-event migration, backup/restore tooling, and a
+  non-destructive archive rehearsal in
+  [`scripts/rehearse_restore.py`](scripts/rehearse_restore.py).
+
+Verification run on 25 October 2026:
+
+```text
+python -m pytest -q
+172 passed, 5 skipped
+
+python -m pytest -q tests/test_graph.py tests/test_governance.py \
+  tests/test_serialization.py tests/test_memory_vertical_slice.py \
+  tests/test_postgres_runtime.py
+53 passed, 1 skipped
+
+python -m researchos.eval
+# ctxflow_graph: 100% answer accuracy, 100% supersession defence,
+# 100% provenance accuracy
+```
+
+The optional `ContextProvider` is now wired into `create_app(memory_store=...)`
+behind `RESEARCHOS_MEMORY_ENABLED`; the default app remains memory-disabled.
+The built-in memory stores now expose optional append-only
+`append_run_event()` and `verify_run_event_chain()` capabilities. These methods
+are deliberately not required by the shared `MemoryStore` protocol.
+
+The only remaining operational gate is executing and recording a live restore
+against a separate staging database. No staging configuration is present in
+this checkout, so the source database has not been used as a restore target.
+
+The existing rehearsal command validates a custom backup archive with
+`pg_restore --list` without modifying the source database. See
+[`docs/ctxflow_s7_rollback.md`](docs/ctxflow_s7_rollback.md) for the safe
+staging and rollback procedure.
+
 ---
 
 ## Installation
@@ -193,7 +242,7 @@ harness with two flat-RAG baselines.
 ### Install and run
 
 ```bash
-pip install -e ".[researchos]"
+pip install -e ".[researchos,orchestration,mcp]"
 researchos-api
 # or: python -m researchos.api.main
 ```
@@ -219,6 +268,41 @@ it needs no npm build. Clicking a citation or graph node opens the
 Research Trace panel: provenance chain, superseded claims, contradictions,
 and source papers.
 
+### Orchestration (LangGraph) and arXiv MCP
+
+The eight-stage research loop (`plan → retrieve → read → memory → pack →
+synthesize → verify → persist`) runs on a **LangGraph `StateGraph`** by default,
+with a plain sequential fallback:
+
+```bash
+export RESEARCHOS_ORCHESTRATOR=langgraph   # or "sequential"
+```
+
+The graph adds explicit node/edge topology, a `MemorySaver` checkpointer keyed
+by `run_id`, and a bounded `verify → pack` repair edge that removes citations
+the critic flags and re-packs once. Both engines return the same result
+dictionary and SSE events; the result and `done` event include
+`"engine": "langgraph" | "sequential"`.
+
+arXiv search goes through **`uvx arxiv-mcp-server`** over MCP when available:
+
+```bash
+uvx --version                                  # ships with uv
+export RESEARCHOS_MCP_ENABLED=1                # default
+export RESEARCHOS_MCP_TIMEOUT=60               # per tool call
+export RESEARCHOS_EXTERNAL_SEARCH=auto         # auto | force | off
+```
+
+A missing `uvx`, a protocol error, or a rate limit is not fatal: the skill
+retries the same query against the plain arXiv HTTP API, records
+`transport: "http"` and `last_mcp_error`, and the run is marked degraded rather
+than failed. `LiteratureSearchSkill.transport_stats` exposes
+`mcp_calls` / `http_fallbacks` / `last_mcp_error` for the demo.
+
+The checked-in demo corpus (`src/researchos/demo/corpus.json`) is **22 real
+arXiv papers** with curated `supersedes` / `contradicts` relations between real
+claims; `POST /api/demo/seed` is idempotent per arXiv ID.
+
 ### Model consumption
 
 Model calls are **off by default**. Without `RESEARCHOS_MODEL_ENABLED=1`,
@@ -234,6 +318,7 @@ export RESEARCHOS_MODEL_PROVIDER=groq       # groq | ollama | nvidia | openroute
 export RESEARCHOS_MODEL_ID=openai/gpt-oss-20b
 export RESEARCHOS_MODEL_TIMEOUT_S=20
 export RESEARCHOS_MAX_RETRIES=2
+export RESEARCHOS_LLM_CLAIM_EXTRACTION=1
 export GROQ_API_KEY=...
 researchos-api
 ```
@@ -244,6 +329,20 @@ and `RESEARCHOS_MODEL_API_KEY` are optional escape hatches for self-hosted or
 proxied OpenAI-compatible endpoints. Only `src/researchos/gateway/model.py`
 imports a provider SDK; agents and skills receive a plain
 `(prompt, system="") -> str` callable.
+
+A model outage is never fatal. A failed call degrades the answer to the
+deterministic evidence bullets and sets `"status": "degraded"` on the run
+(`success` stays `true`). An invalid API key also trips a circuit breaker after
+the first 401, so ingestion does not retry a dead provider for every node.
+Rate-limit responses are retried after the provider's own hint (for example
+Groq's `try again in 18.4s`), capped at 30 s per attempt.
+
+Free provider tiers cap tokens per minute (Groq's free tier is 8k TPM).
+Reading a batch of fresh abstracts can spend that entire window before the
+answer is written, so set `RESEARCHOS_LLM_CLAIM_EXTRACTION=0` to keep abstract
+claim extraction on the deterministic sentence splitter and reserve the model
+call budget for synthesis and verification. The checked-in demo corpus already
+ships 180 claims, so this only affects newly fetched papers.
 
 ```python
 from researchos.gateway import create_model_gateway
@@ -265,6 +364,51 @@ alert instead of returning a 200 that looks successful. `RESEARCHOS_MAX_RETRIES`
 is capped at 10, and `temperature` overrides are validated against `0..2`.
 The test suite clears model variables and ignores the project `.env`, so local
 provider settings never leak into it.
+
+### Literature search outcomes
+
+Provider failures are no longer flattened into an empty result list. The
+list-returning functions remain for compatibility, and the outcome-aware API
+reports what actually happened:
+
+```python
+from researchos.skills.literature_search import LiteratureSearchSkill
+
+skill = LiteratureSearchSkill()
+outcome = skill.search_with_outcome("graph neural networks", provider="both")
+
+outcome.status          # ok | empty | partial | error
+outcome.results         # deduplicated list[PaperResult]
+outcome.errors          # {"semantic_scholar": "HTTPError: 429 ..."}
+outcome.to_dict()       # per-provider status, error type, cache/latency/transport
+```
+
+`provider="both"` queries arXiv, Semantic Scholar, and the keyless OpenAlex API;
+pass `"arxiv"`, `"semantic_scholar"`, or `"openalex"` to narrow it. Each
+per-provider entry reports `transport` (`mcp` or `http` for arXiv), so a demo
+can show that the MCP server actually served the query.
+
+`RetrieverAgent` exposes the same payload as
+`data["external_search"]` and mirrors the status in its metadata, so an
+outage is visible in the API/SSE stream instead of looking like "no papers
+found". It reports `skipped` when the graph already has enough context, and
+`unknown` for injected custom skills that only implement `search()`. Provider
+errors are never cached; successful and genuinely empty responses are.
+
+The status is carried all the way out:
+
+- `POST /api/search` returns `status` (`ok` / `empty` / `partial` / `error` /
+  `unknown`), per-provider `providers` detail (error type, HTTP status, cache
+  hit, latency), and an `errors` map, alongside the usual `results` / `total`.
+- `POST /api/chat` and the `/api/stream` `done` event include the
+  `external_search` payload, so a client can distinguish "no papers" from
+  "provider down".
+- A total provider failure marks the retriever step failed
+  (`success=false`, error listing per-provider causes) and the router reports
+  `success=false` with `metadata.partial` and `metadata.failed_agents`. A
+  partial failure stays successful but is flagged `metadata.degraded`.
+- The cache opens one SQLite connection per thread, so the API's worker-thread
+  pipeline (`/api/stream`) no longer crashes the retriever.
 
 ### Evaluation
 
@@ -291,6 +435,6 @@ objects when available.
 ```bash
 pytest tests/test_agents.py tests/test_skills.py tests/test_api.py \
        tests/test_workspace_api.py tests/test_eval_harness.py \
-       tests/test_model_gateway.py
+       tests/test_model_gateway.py tests/test_literature_search_outcomes.py \
+       tests/test_evidence_api.py
 ```
-

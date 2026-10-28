@@ -20,15 +20,26 @@ class TestWorkspaceUI:
         response = client.get("/")
         assert response.status_code == 200
         assert "ResearchOS" in response.text
-        assert "/app.js" in response.text
+        # The bundled UI is either the legacy vanilla bundle or the Vite build.
+        assert "/app.js" in response.text or "/assets/" in response.text
 
     def test_static_assets_are_served(self, client):
-        assert client.get("/app.js").status_code == 200
-        assert client.get("/styles.css").status_code == 200
+        import re
+
+        html = client.get("/").text
+        match = re.search(r'(?:src|href)="(/assets/[^"]+\.(?:js|css))"', html)
+        if match:
+            assert client.get(match.group(1)).status_code == 200
+        else:
+            assert client.get("/app.js").status_code == 200
+            assert client.get("/styles.css").status_code == 200
 
 
 class TestNotes:
     def test_create_and_list_notes(self, client):
+        other_revision_before = client.get(
+            "/api/graph/stats?project_id=other"
+        ).json()["revision"]
         created = client.post(
             "/api/notes",
             json={
@@ -49,10 +60,16 @@ class TestNotes:
         data = listed.json()
         assert data["total"] == 1
         assert data["notes"][0]["title"] == "Leakage hypothesis"
+        graph = client.get("/api/graph/data?project_id=thesis").json()
+        assert any(node["id"] == note["node_id"] for node in graph["nodes"])
+        revision = client.get("/api/graph/stats?project_id=thesis").json()["revision"]
+        assert revision > 0
 
         # Project isolation.
         other = client.get("/api/notes?project_id=other").json()
         assert other["total"] == 0
+        other_graph = client.get("/api/graph/stats?project_id=other").json()
+        assert other_graph["revision"] == other_revision_before
 
 
 class TestRoutingAgents:

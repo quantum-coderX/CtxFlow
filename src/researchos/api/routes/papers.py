@@ -13,6 +13,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ctxflow.models import NodeStatus
 from researchos.api.schemas import (
+    DemoSeedRequest,
+    DemoSeedResponse,
     EdgeResponse,
     GraphDataResponse,
     GraphStatsResponse,
@@ -23,6 +25,8 @@ from researchos.api.schemas import (
     TraceResponse,
     TraceStepResponse,
 )
+from researchos.api.graph_revision import bump_graph_revision, get_graph_revision
+from researchos.demo import seed_demo_corpus
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +66,52 @@ def _title_tags(title: str) -> set:
     return tags
 
 
+def _resolve_ctxflow(project_id: str = "default") -> Any:
+    """Return the project-scoped CtxFlow graph, falling back to the global."""
+    ws = _app_state.get("workspace")
+    if ws is not None:
+        return ws.get_graph(project_id)
+    ctx = _app_state.get("ctxflow")
+    if ctx is None:
+        raise HTTPException(503, detail="CtxFlow not initialized")
+    return ctx
+
+
+def _save_graph(project_id: str = "default") -> None:
+    bump_graph_revision(project_id)
+    ws = _app_state.get("workspace")
+    if ws is not None:
+        ws.save_graph(project_id)
+
+
+@router.post("/demo/seed", response_model=DemoSeedResponse)
+async def seed_demo(request: DemoSeedRequest) -> DemoSeedResponse:
+    """Load the checked-in demo corpus into the graph (idempotent)."""
+    ctxflow = _resolve_ctxflow(request.project_id)
+
+    try:
+        stats = seed_demo_corpus(ctxflow, project_id=request.project_id)
+        _save_graph(request.project_id)
+        total = stats["papers_ingested"] + stats["papers_skipped"]
+        return DemoSeedResponse(
+            **stats,
+            message=(
+                f"Demo corpus ready: ingested {stats['papers_ingested']} paper(s) "
+                f"and {stats['claims_ingested']} claim(s); skipped "
+                f"{stats['papers_skipped']} of {total} already present. "
+                f"{stats.get('superseded_claims', 0)} superseded and "
+                f"{stats.get('contested_claims', 0)} contested claim(s)."
+            ),
+        )
+    except Exception as exc:
+        logger.error("Demo seed failed: %s", exc, exc_info=True)
+        raise HTTPException(500, detail=str(exc))
+
+
 @router.post("/papers/ingest", response_model=PaperIngestResponse)
 async def ingest_paper(request: PaperIngestRequest) -> PaperIngestResponse:
     """Ingest a paper into the knowledge graph."""
-    ctxflow = _app_state.get("ctxflow")
-    if ctxflow is None:
-        raise HTTPException(503, detail="CtxFlow not initialized")
+    ctxflow = _resolve_ctxflow(request.project_id)
 
     try:
         # Create paper reference node
@@ -127,6 +171,7 @@ async def ingest_paper(request: PaperIngestRequest) -> PaperIngestResponse:
         contradictions = max(
             0, _superseded_count(ctxflow) - superseded_before
         )
+        _save_graph(request.project_id)
 
         return PaperIngestResponse(
             success=True,
@@ -148,9 +193,7 @@ async def upload_paper(
     title: str = Form(""),
 ) -> PaperIngestResponse:
     """Parse a PDF with the Paper Reader skill and ingest its claims."""
-    ctxflow = _app_state.get("ctxflow")
-    if ctxflow is None:
-        raise HTTPException(503, detail="CtxFlow not initialized")
+    ctxflow = _resolve_ctxflow(project_id)
 
     paper_reader = _app_state.get("paper_reader")
     if paper_reader is None:
@@ -227,6 +270,7 @@ async def upload_paper(
         claim_ids.append(claim_id)
 
     contradictions = max(0, _superseded_count(ctxflow) - superseded_before)
+    _save_graph(project_id)
 
     return PaperIngestResponse(
         success=True,
@@ -245,11 +289,9 @@ async def upload_paper(
 # ---------------------------------------------------------------------------
 
 @router.get("/graph/stats", response_model=GraphStatsResponse)
-async def graph_stats() -> GraphStatsResponse:
+async def graph_stats(project_id: str = "default") -> GraphStatsResponse:
     """Get knowledge graph statistics."""
-    ctxflow = _app_state.get("ctxflow")
-    if ctxflow is None:
-        raise HTTPException(503, detail="CtxFlow not initialized")
+    ctxflow = _resolve_ctxflow(project_id)
 
     graph = ctxflow.graph
     all_nodes = graph.all_nodes()
@@ -264,17 +306,16 @@ async def graph_stats() -> GraphStatsResponse:
     return GraphStatsResponse(
         total_nodes=graph.node_count,
         total_edges=graph.edge_count,
+        revision=get_graph_revision(project_id),
         status_distribution=status_dist,
         type_distribution=type_dist,
     )
 
 
 @router.get("/graph/data", response_model=GraphDataResponse)
-async def graph_data() -> GraphDataResponse:
+async def graph_data(project_id: str = "default") -> GraphDataResponse:
     """Get full graph data for visualization."""
-    ctxflow = _app_state.get("ctxflow")
-    if ctxflow is None:
-        raise HTTPException(503, detail="CtxFlow not initialized")
+    ctxflow = _resolve_ctxflow(project_id)
 
     graph = ctxflow.graph
     all_nodes = graph.all_nodes()
@@ -312,11 +353,9 @@ async def graph_data() -> GraphDataResponse:
 # ---------------------------------------------------------------------------
 
 @router.post("/trace", response_model=TraceResponse)
-async def research_trace(request: TraceRequest) -> TraceResponse:
+async def research_trace(request: TraceRequest, project_id: str = "default") -> TraceResponse:
     """Build a research trace for a node."""
-    ctxflow = _app_state.get("ctxflow")
-    if ctxflow is None:
-        raise HTTPException(503, detail="CtxFlow not initialized")
+    ctxflow = _resolve_ctxflow(project_id)
 
     try:
         trace = ctxflow.research_trace(request.node_id)

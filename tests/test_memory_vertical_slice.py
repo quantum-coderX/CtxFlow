@@ -13,10 +13,12 @@ from ctxflow.memory import (
     EventIngestor,
     HashEmbedder,
     InMemoryMemoryStore,
+    Memory,
     Relation,
     SimpleTokenizer,
     count_tokens,
 )
+from researchos.memory.context import MemoryContextProvider
 
 
 def test_ingestion_is_idempotent_and_creates_session_edge():
@@ -65,6 +67,45 @@ def test_token_counts_are_lazy_and_cached():
     tokenizer = SimpleTokenizer()
     assert count_tokens(memory, tokenizer) == 3
     assert memory.token_counts == {"simple-v1": 3}
+
+
+def test_project_scope_isolation_and_context_budget():
+    async def run():
+        store = InMemoryMemoryStore()
+        await store.add(
+            Memory(
+                id="project-a",
+                project_id="a",
+                text="project alpha finding",
+            )
+        )
+        await store.add(
+            Memory(
+                id="project-b",
+                project_id="b",
+                text="project beta finding",
+            )
+        )
+
+        result = await store.search(None, "finding", 10, project_id="a")
+        assert [item.memory_id for item in result] == ["project-a"]
+        assert await store.get("project-b", project_id="a") is None
+
+        provider = MemoryContextProvider(store)
+        context = await provider.retrieve("a", "finding", token_budget=10)
+        assert [item.memory_id for item in context] == ["project-a"]
+        assert context[0].tokens == 3
+
+    asyncio.run(run())
+
+
+def test_memory_context_provider_rejects_missing_project_scope():
+    async def run():
+        provider = MemoryContextProvider(InMemoryMemoryStore())
+        with pytest.raises(ValueError, match="project_id"):
+            await provider.retrieve("", "query", token_budget=10)
+
+    asyncio.run(run())
 
 
 def test_ingestion_enriches_memories_and_links_duplicates():

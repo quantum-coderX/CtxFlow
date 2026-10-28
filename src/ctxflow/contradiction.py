@@ -21,6 +21,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Protocol, Set
 
 from ctxflow.graph import ContextGraph
+from ctxflow.governance import GovernanceEngine
 from ctxflow.models import (
     ContradictionResult,
     CtxFlowConfig,
@@ -103,6 +104,7 @@ class ContradictionDetector:
     ) -> None:
         self.config = config
         self._llm = llm
+        self._governance = GovernanceEngine(config)
 
     @property
     def enabled(self) -> bool:
@@ -226,15 +228,21 @@ class ContradictionDetector:
             },
         )
 
-        if not graph.add_edge(edge):
-            return None
-
-        # Update the old node's status.
-        if result.relation == "supersedes":
-            old_node.status = NodeStatus.SUPERSEDED
-            old_node.superseded_by = new_node_id
-        elif result.relation == "contradicts":
-            old_node.status = NodeStatus.CONTESTED
+        old_status = old_node.status
+        old_superseded_by = old_node.superseded_by
+        try:
+            if not self._governance.add_edge(graph, edge):
+                return None
+            if result.relation == "supersedes":
+                old_node.status = NodeStatus.SUPERSEDED
+                old_node.superseded_by = new_node_id
+            elif result.relation == "contradicts":
+                old_node.status = NodeStatus.CONTESTED
+        except Exception:
+            graph.remove_edge(new_node_id, old_node_id)
+            old_node.status = old_status
+            old_node.superseded_by = old_superseded_by
+            raise
 
         logger.info(
             "Applied %s: %s -> %s (confidence=%.2f)",

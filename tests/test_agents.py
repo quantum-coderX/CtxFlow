@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+from typing import List
+
 import pytest
 
 from ctxflow import CtxFlow
@@ -12,6 +15,7 @@ from researchos.agents.reader import ReaderAgent
 from researchos.agents.retriever import RetrieverAgent
 from researchos.agents.router import QueryIntent, SkillRouter, classify_intent
 from researchos.agents.synthesizer import SynthesizerAgent
+from researchos.skills.paper_reader import PaperReaderSkill, PaperSection
 
 
 class TestSkillRouter:
@@ -80,6 +84,153 @@ class TestReaderAgent:
         assert res.data["total_nodes_created"] >= 2
         assert cf.graph.node_count >= 2
 
+    def test_claim_extraction_can_skip_the_model(self, monkeypatch):
+        """Token-capped tiers keep the model for synthesis, not extraction."""
+        monkeypatch.setenv("RESEARCHOS_LLM_CLAIM_EXTRACTION", "0")
+
+        prompts: List[str] = []
+
+        def llm(prompt, system=""):
+            prompts.append(prompt)
+            return "[]"
+
+        cf = CtxFlow()
+        reader = ReaderAgent(ctxflow=cf, llm=llm)
+        claims = reader._extract_abstract_claims(
+            "We introduce Mamba, a fast architecture. "
+            "It achieves 5x higher throughput than Transformers."
+        )
+
+        assert prompts == []
+        assert len(claims) == 2
+        assert "Mamba" in claims[0]["text"]
+
+    def test_fulltext_top3_is_opt_in_and_bounded_to_first_three(self, monkeypatch):
+        monkeypatch.setenv("RESEARCHOS_FULLTEXT", "top3")
+
+        class FakePaperReader:
+            def __init__(self):
+                self.paths = []
+
+            def read_selected_sections(self, path):
+                self.paths.append(path)
+                return {
+                    "content": "Introduction excerpt",
+                    "claims": [{
+                        "type": "claim",
+                        "text": "A full-text claim with enough words to be useful.",
+                        "section": "Introduction",
+                        "page": 2,
+                    }],
+                }
+
+        reader_skill = FakePaperReader()
+        reader = ReaderAgent(ctxflow=CtxFlow(), paper_reader=reader_skill)
+        downloaded = []
+
+        def fake_download(arxiv_id, remaining_s):
+            downloaded.append(arxiv_id)
+            assert remaining_s > 0
+            return b"%PDF-fake"
+
+        monkeypatch.setattr(reader, "_download_arxiv_pdf", fake_download)
+        ingested = []
+        monkeypatch.setattr(
+            reader,
+            "_ingest_paper_detail",
+            lambda paper, query: (ingested.append(paper) or [paper["arxiv_id"]], False),
+        )
+        papers = [
+            {"title": str(index), "arxiv_id": f"2405.1650{index}"}
+            for index in range(4)
+        ]
+
+        result = reader.run(
+            query="test",
+            context={
+                "previous_output": {"external_results": papers},
+                "fulltext_deadline": time.monotonic() + 10,
+            },
+        )
+
+        assert result.success
+        assert downloaded == [paper["arxiv_id"] for paper in papers[:3]]
+        assert len(reader_skill.paths) == 3
+        assert [paper.get("access_status") for paper in ingested] == [
+            "full_text",
+            "full_text",
+            "full_text",
+            None,
+        ]
+        assert ingested[0]["claims"][0]["section"] == "Introduction"
+        assert ingested[0]["claims"][0]["page"] == 2
+
+    def test_fulltext_defaults_off(self, monkeypatch):
+        monkeypatch.delenv("RESEARCHOS_FULLTEXT", raising=False)
+        reader = ReaderAgent(ctxflow=CtxFlow())
+        monkeypatch.setattr(
+            reader,
+            "_download_arxiv_pdf",
+            lambda *args: pytest.fail("full-text download must be disabled by default"),
+        )
+        monkeypatch.setattr(reader, "_ingest_paper_detail", lambda *args: ([], False))
+
+        result = reader.run(
+            query="test",
+            context={
+                "previous_output": {
+                    "external_results": [{"title": "paper", "arxiv_id": "2405.16506"}]
+                }
+            },
+        )
+
+        assert result.success
+
+    def test_fulltext_skips_download_after_wall_clock_deadline(self, monkeypatch):
+        monkeypatch.setenv("RESEARCHOS_FULLTEXT", "top3")
+        reader = ReaderAgent(ctxflow=CtxFlow())
+        monkeypatch.setattr(
+            reader,
+            "_download_arxiv_pdf",
+            lambda *args: pytest.fail("download must not start after the deadline"),
+        )
+        monkeypatch.setattr(reader, "_ingest_paper_detail", lambda *args: ([], False))
+
+        result = reader.run(
+            query="test",
+            context={
+                "previous_output": {
+                    "external_results": [{"title": "paper", "arxiv_id": "2405.16506"}]
+                },
+                "fulltext_deadline": time.monotonic() - 1,
+            },
+        )
+
+        assert result.success
+
+
+def test_paper_reader_limits_fulltext_to_intro_results_and_conclusion(monkeypatch):
+    skill = PaperReaderSkill()
+    monkeypatch.setattr(
+        "researchos.skills.paper_reader.extract_sections_from_pdf",
+        lambda path: [
+            PaperSection("Abstract", "Abstract text is excluded.", [0]),
+            PaperSection("1 Introduction", "The introduction explains the method.", [1]),
+            PaperSection("Methods", "Methods text is excluded.", [2]),
+            PaperSection("4 Results", "The results improve performance.", [3]),
+            PaperSection("Conclusion", "We conclude the method works.", [4]),
+        ],
+    )
+
+    excerpts = skill.read_selected_sections("unused.pdf")
+
+    assert "Abstract text" not in excerpts["content"]
+    assert "Methods text" not in excerpts["content"]
+    assert all(
+        claim["section"] in {"1 Introduction", "4 Results", "Conclusion"}
+        for claim in excerpts["claims"]
+    )
+    assert {claim["page"] for claim in excerpts["claims"]} == {1, 3, 4}
 
 class TestSynthesizerAgent:
     """Tests for SynthesizerAgent bias-aware reordering and prompt packing."""
@@ -94,6 +245,33 @@ class TestSynthesizerAgent:
         assert res.success is True
         assert "AdamW" in res.data["answer"]
         assert len(res.data["cited_nodes"]) >= 1
+
+    def test_synthesizer_uses_bounded_history_for_follow_up_without_graph_evidence(self):
+        prompts = []
+
+        def llm(prompt, system=""):
+            prompts.append(prompt)
+            return "The prior response recommended checking the retrieval cost."
+
+        synthesizer = SynthesizerAgent(ctxflow=CtxFlow(), llm=llm)
+        result = synthesizer.run(
+            query="What did you recommend checking?",
+            context={
+                "token_budget": 256,
+                "conversation_history": [
+                    {
+                        "query": "How does the system trade off retrieval quality and cost?",
+                        "answer": "The prior response recommended checking the retrieval cost.",
+                    }
+                ],
+            },
+        )
+
+        assert result.success is True
+        assert "retrieval cost" in prompts[0]
+        assert "untrusted" in prompts[0]
+        assert result.data["cited_nodes"] == []
+        assert result.metadata["tokens_used"] <= result.metadata["token_budget"]
 
 
 class TestCriticAgent:

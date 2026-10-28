@@ -255,6 +255,27 @@ class SkillRouter(BaseAgent):
         if isinstance(external_search, dict):
             metadata["external_search_status"] = external_search.get("status")
 
+        # Hoist the synthesizer's context-window accounting so the API/UI can
+        # show how many retrieved nodes made it into the answer.
+        for previous in pipeline_results:
+            if previous.agent_name == "synthesizer" and isinstance(
+                previous.metadata, dict
+            ):
+                usage = {
+                    key: previous.metadata[key]
+                    for key in (
+                        "nodes_retrieved",
+                        "nodes_used",
+                        "nodes_dropped",
+                        "tokens_used",
+                        "token_budget",
+                    )
+                    if key in previous.metadata
+                }
+                if usage:
+                    metadata["context_usage"] = usage
+                break
+
         return AgentResult(
             agent_name=self.name,
             success=bool(pipeline_results) and all_success,

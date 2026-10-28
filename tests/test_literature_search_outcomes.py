@@ -245,6 +245,10 @@ class TestSearchOutcomeAggregation:
             "researchos.skills.literature_search.search_semantic_scholar_outcome",
             fail_s2,
         )
+        monkeypatch.setattr(
+            "researchos.skills.literature_search.search_openalex_outcome",
+            lambda *a, **k: outcome("openalex", SearchStatus.EMPTY),
+        )
 
         result = skill.search_with_outcome("attention", provider="both")
         skill.close()
@@ -265,6 +269,10 @@ class TestSearchOutcomeAggregation:
                 "semantic_scholar", SearchStatus.ERROR, error="rate limited"
             ),
         )
+        monkeypatch.setattr(
+            "researchos.skills.literature_search.search_openalex_outcome",
+            lambda *a, **k: outcome("openalex", SearchStatus.ERROR, error="quota"),
+        )
         skill = LiteratureSearchSkill(cache_dir=str(tmp_path))
 
         result = skill.search_with_outcome("attention", provider="both")
@@ -276,6 +284,7 @@ class TestSearchOutcomeAggregation:
         assert result.errors == {
             "arxiv": "boom",
             "semantic_scholar": "rate limited",
+            "openalex": "quota",
         }
         # Backward-compatible search() stays list-shaped and does not raise.
         assert legacy == []
@@ -288,6 +297,10 @@ class TestSearchOutcomeAggregation:
         monkeypatch.setattr(
             "researchos.skills.literature_search.search_semantic_scholar_outcome",
             lambda *a, **k: outcome("semantic_scholar", SearchStatus.EMPTY),
+        )
+        monkeypatch.setattr(
+            "researchos.skills.literature_search.search_openalex_outcome",
+            lambda *a, **k: outcome("openalex", SearchStatus.EMPTY),
         )
         skill = LiteratureSearchSkill(cache_dir=str(tmp_path))
 
@@ -398,7 +411,8 @@ class FakeLegacySkill:
 
 
 class TestRetrieverOutcomeWiring:
-    def test_retriever_exposes_provider_failure(self):
+    def test_retriever_exposes_provider_failure(self, monkeypatch):
+        monkeypatch.setenv("RESEARCHOS_EXTERNAL_SEARCH", "force")
         cf = CtxFlow()
         failure = SearchOutcome(
             query="attention",
@@ -427,7 +441,8 @@ class TestRetrieverOutcomeWiring:
         assert result.metadata["external_search_status"] == "partial"
         assert result.metadata["external_errors"] == {"arxiv": "upstream 503"}
 
-    def test_retriever_keeps_legacy_skill_compatibility(self):
+    def test_retriever_keeps_legacy_skill_compatibility(self, monkeypatch):
+        monkeypatch.setenv("RESEARCHOS_EXTERNAL_SEARCH", "force")
         cf = CtxFlow()
         retriever = RetrieverAgent(
             ctxflow=cf,

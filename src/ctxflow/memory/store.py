@@ -99,6 +99,7 @@ class Memory:
     tier: MemoryTier = MemoryTier.EPISODIC
     created_at: datetime = field(default_factory=_now)
     session_id: str | None = None
+    project_id: str = "default"
     source: str = ""
     importance: float = 0.0
     access_count: int = 0
@@ -178,6 +179,8 @@ class MemoryStore(Protocol):
         memory_id: str,
         version: int | None = None,
         as_of: datetime | None = None,
+        *,
+        project_id: str = "default",
     ) -> Memory | None: ...
 
     async def create_version(
@@ -189,6 +192,7 @@ class MemoryStore(Protocol):
         actor: str,
         *,
         embedding: Sequence[float] | None = None,
+        project_id: str = "default",
     ) -> int: ...
 
     async def search(
@@ -197,6 +201,7 @@ class MemoryStore(Protocol):
         query_text: str,
         k: int,
         *,
+        project_id: str = "default",
         types: Iterable[MemoryType] | None = None,
         include_archived: bool = False,
         include_history: bool = False,
@@ -207,6 +212,7 @@ class MemoryStore(Protocol):
         self,
         memory_id: str,
         *,
+        project_id: str = "default",
         depth: int,
         relations: Iterable[Relation] | None = None,
         direction: str = "both",
@@ -214,7 +220,6 @@ class MemoryStore(Protocol):
         fanout_cap: int = 20,
     ) -> Subgraph: ...
 
-    async def get_version_history(self, memory_id: str) -> list[MemoryVersion]: ...
-
-    async def record_access(self, memory_id: str) -> None: ...
-
+    async def get_version_history(
+        self, memory_id: str, *, project_id: str = "default"
+    ) -> list[MemoryVersion]: ...

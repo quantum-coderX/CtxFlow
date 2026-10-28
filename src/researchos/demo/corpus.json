@@ -1,0 +1,400 @@
+[
+ {
+  "arxiv_id": "2307.03172",
+  "title": "Lost in the Middle: How Language Models Use Long Contexts",
+  "authors": [
+   "Nelson F. Liu",
+   "Kevin Lin",
+   "John Hewitt",
+   "Ashwin Paranjape",
+   "Michele Bevilacqua",
+   "Fabio Petroni",
+   "Percy Liang"
+  ],
+  "year": 2023,
+  "abstract": "While recent language models have the ability to take long contexts as input, relatively little is known about how well they use longer context. We analyze the performance of language models on two tasks that require identifying relevant information in their input contexts: multi-document question answering and key-value retrieval. We find that performance can degrade significantly when changing the position of relevant information, indicating that current language models do not robustly make use of information in long input contexts. In particular, we observe that performance is often highest when relevant information occurs at the beginning or end of the input context, and significantly degrades when models must access relevant information in the middle of long contexts, even for explicitly long-context models. Our analysis provides a better understanding of how language models use their input context and provides new evaluation protocols for future long-context language models.",
+  "url": "https://arxiv.org/abs/2307.03172v3"
+ },
+ {
+  "arxiv_id": "2406.14550",
+  "title": "GraphReader: Building Graph-based Agent to Enhance Long-Context Abilities of Large Language Models",
+  "authors": [
+   "Shilong Li",
+   "Yancheng He",
+   "Hangyu Guo",
+   "Xingyuan Bu",
+   "Ge Bai",
+   "Jie Liu",
+   "Jiaheng Liu",
+   "Xingwei Qu",
+   "Yangguang Li",
+   "Wanli Ouyang",
+   "Wenbo Su",
+   "Bo Zheng"
+  ],
+  "year": 2024,
+  "abstract": "Long-context capabilities are essential for large language models (LLMs) to tackle complex and long-input tasks. Despite numerous efforts made to optimize LLMs for long contexts, challenges persist in robustly processing long inputs. In this paper, we introduce GraphReader, a graph-based agent system designed to handle long texts by structuring them into a graph and employing an agent to explore this graph autonomously. Upon receiving a question, the agent first undertakes a step-by-step analysis and devises a rational plan. It then invokes a set of predefined functions to read node content and neighbors, facilitating a coarse-to-fine exploration of the graph. Throughout the exploration, the agent continuously records new insights and reflects on current circumstances to optimize the process until it has gathered sufficient information to generate an answer. Experimental results on the LV-Eval dataset reveal that GraphReader, using a 4k context window, consistently outperforms GPT-4-128k across context lengths from 16k to 256k by a large margin. Additionally, our approach demonstrates superior performance on four challenging single-hop and multi-hop benchmarks.",
+  "url": "https://arxiv.org/abs/2406.14550v2"
+ },
+ {
+  "arxiv_id": "2504.19413",
+  "title": "Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory",
+  "authors": [
+   "Prateek Chhikara",
+   "Dev Khant",
+   "Saket Aryan",
+   "Taranjeet Singh",
+   "Deshraj Yadav"
+  ],
+  "year": 2025,
+  "abstract": "Large Language Models (LLMs) have demonstrated remarkable prowess in generating contextually coherent responses, yet their fixed context windows pose fundamental challenges for maintaining consistency over prolonged multi-session dialogues. We introduce Mem0, a scalable memory-centric architecture that addresses this issue by dynamically extracting, consolidating, and retrieving salient information from ongoing conversations. Building on this foundation, we further propose an enhanced variant that leverages graph-based memory representations to capture complex relational structures among conversational elements. Through comprehensive evaluations on LOCOMO benchmark, we systematically compare our approaches against six baseline categories: (i) established memory-augmented systems, (ii) retrieval-augmented generation (RAG) with varying chunk sizes and k-values, (iii) a full-context approach that processes the entire conversation history, (iv) an open-source memory solution, (v) a proprietary model system, and (vi) a dedicated memory management platform. Empirical results show that our methods consistently outperform all existing memory systems across four question categories: single-hop, temporal, multi-hop, and open-domain. Notably, Mem0 achieves 26% relative improvements in the LLM-as-a-Judge metric over OpenAI, while Mem0 with graph memory achieves around 2% higher overall score than the base configuration. Beyond accuracy gains, we also markedly reduce computational overhead compared to full-context method. In particular, Mem0 attains a 91% lower p95 latency and saves more than 90% token cost, offering a compelling balance between advanced reasoning capabilities and practical deployment constraints. Our findings highlight critical role of structured, persistent memory mechanisms for long-term conversational coherence, paving the way for more reliable and efficient LLM-driven AI agents.",
+  "url": "https://arxiv.org/abs/2504.19413v1"
+ },
+ {
+  "arxiv_id": "2310.06839",
+  "title": "LongLLMLingua: Accelerating and Enhancing LLMs in Long Context Scenarios via Prompt Compression",
+  "authors": [
+   "Huiqiang Jiang",
+   "Qianhui Wu",
+   "Xufang Luo",
+   "Dongsheng Li",
+   "Chin-Yew Lin",
+   "Yuqing Yang",
+   "Lili Qiu"
+  ],
+  "year": 2023,
+  "abstract": "In long context scenarios, large language models (LLMs) face three main challenges: higher computational cost, performance reduction, and position bias. Research indicates that LLM performance hinges on the density and position of key information in the input prompt. Inspired by these findings, we propose LongLLMLingua for prompt compression towards improving LLMs' perception of the key information to simultaneously address the three challenges. Our extensive evaluation across various long context scenarios demonstrates that LongLLMLingua not only enhances performance but also significantly reduces costs and latency. For instance, in the NaturalQuestions benchmark, LongLLMLingua boosts performance by up to 21.4% with around 4x fewer tokens in GPT-3.5-Turbo, leading to substantial cost savings. It achieves a 94.0% cost reduction in the LooGLE benchmark. Moreover, when compressing prompts of about 10k tokens at ratios of 2x-6x, LongLLMLingua can accelerate end-to-end latency by 1.4x-2.6x. Our code is available at https://aka.ms/LongLLMLingua.",
+  "url": "https://arxiv.org/abs/2310.06839v2"
+ },
+ {
+  "arxiv_id": "2408.04948",
+  "title": "HybridRAG: Integrating Knowledge Graphs and Vector Retrieval Augmented Generation for Efficient Information Extraction",
+  "authors": [
+   "Bhaskarjit Sarmah",
+   "Benika Hall",
+   "Rohan Rao",
+   "Sunil Patel",
+   "Stefano Pasquali",
+   "Dhagash Mehta"
+  ],
+  "year": 2024,
+  "abstract": "Extraction and interpretation of intricate information from unstructured text data arising in financial applications, such as earnings call transcripts, present substantial challenges to large language models (LLMs) even using the current best practices to use Retrieval Augmented Generation (RAG) (referred to as VectorRAG techniques which utilize vector databases for information retrieval) due to challenges such as domain specific terminology and complex formats of the documents. We introduce a novel approach based on a combination, called HybridRAG, of the Knowledge Graphs (KGs) based RAG techniques (called GraphRAG) and VectorRAG techniques to enhance question-answer (Q&A) systems for information extraction from financial documents that is shown to be capable of generating accurate and contextually relevant answers. Using experiments on a set of financial earning call transcripts documents which come in the form of Q&A format, and hence provide a natural set of pairs of ground-truth Q&As, we show that HybridRAG which retrieves context from both vector database and KG outperforms both traditional VectorRAG and GraphRAG individually when evaluated at both the retrieval and generation stages in terms of retrieval accuracy and answer generation. The proposed technique has applications beyond the financial domain",
+  "url": "https://arxiv.org/abs/2408.04948v1"
+ },
+ {
+  "arxiv_id": "2404.16130",
+  "title": "From Local to Global: A Graph RAG Approach to Query-Focused Summarization",
+  "authors": [
+   "Darren Edge",
+   "Ha Trinh",
+   "Newman Cheng",
+   "Joshua Bradley",
+   "Alex Chao",
+   "Apurva Mody",
+   "Steven Truitt",
+   "Dasha Metropolitansky",
+   "Robert Osazuwa Ness",
+   "Jonathan Larson"
+  ],
+  "year": 2024,
+  "abstract": "The use of retrieval-augmented generation (RAG) to retrieve relevant information from an external knowledge source enables large language models (LLMs) to answer questions over private and/or previously unseen document collections. However, RAG fails on global questions directed at an entire text corpus, such as \"What are the main themes in the dataset?\", since this is inherently a query-focused summarization (QFS) task, rather than an explicit retrieval task. Prior QFS methods, meanwhile, do not scale to the quantities of text indexed by typical RAG systems. To combine the strengths of these contrasting methods, we propose GraphRAG, a graph-based approach to question answering over private text corpora that scales with both the generality of user questions and the quantity of source text. Our approach uses an LLM to build a graph index in two stages: first, to derive an entity knowledge graph from the source documents, then to pregenerate community summaries for all groups of closely related entities. Given a question, each community summary is used to generate a partial response, before all partial responses are again summarized in a final response to the user. For a class of global sensemaking questions over datasets in the 1 million token range, we show that GraphRAG leads to substantial improvements over a conventional RAG baseline for both the comprehensiveness and diversity of generated answers.",
+  "url": "https://arxiv.org/abs/2404.16130v2"
+ },
+ {
+  "arxiv_id": "2312.10997",
+  "title": "Retrieval-Augmented Generation for Large Language Models: A Survey",
+  "authors": [
+   "Yunfan Gao",
+   "Yun Xiong",
+   "Xinyu Gao",
+   "Kangxiang Jia",
+   "Jinliu Pan",
+   "Yuxi Bi",
+   "Yi Dai",
+   "Jiawei Sun",
+   "Meng Wang",
+   "Haofen Wang"
+  ],
+  "year": 2023,
+  "abstract": "Large Language Models (LLMs) showcase impressive capabilities but encounter challenges like hallucination, outdated knowledge, and non-transparent, untraceable reasoning processes. Retrieval-Augmented Generation (RAG) has emerged as a promising solution by incorporating knowledge from external databases. This enhances the accuracy and credibility of the generation, particularly for knowledge-intensive tasks, and allows for continuous knowledge updates and integration of domain-specific information. RAG synergistically merges LLMs' intrinsic knowledge with the vast, dynamic repositories of external databases. This comprehensive review paper offers a detailed examination of the progression of RAG paradigms, encompassing the Naive RAG, the Advanced RAG, and the Modular RAG. It meticulously scrutinizes the tripartite foundation of RAG frameworks, which includes the retrieval, the generation and the augmentation techniques. The paper highlights the state-of-the-art technologies embedded in each of these critical components, providing a profound understanding of the advancements in RAG systems. Furthermore, this paper introduces up-to-date evaluation framework and benchmark. At the end, this article delineates the challenges currently faced and points out prospective avenues for research and development.",
+  "url": "https://arxiv.org/abs/2312.10997v5"
+ },
+ {
+  "arxiv_id": "2405.14831",
+  "title": "HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models",
+  "authors": [
+   "Bernal Jiménez Gutiérrez",
+   "Yiheng Shu",
+   "Yu Gu",
+   "Michihiro Yasunaga",
+   "Yu Su"
+  ],
+  "year": 2024,
+  "abstract": "In order to thrive in hostile and ever-changing natural environments, mammalian brains evolved to store large amounts of knowledge about the world and continually integrate new information while avoiding catastrophic forgetting. Despite the impressive accomplishments, large language models (LLMs), even with retrieval-augmented generation (RAG), still struggle to efficiently and effectively integrate a large amount of new experiences after pre-training. In this work, we introduce HippoRAG, a novel retrieval framework inspired by the hippocampal indexing theory of human long-term memory to enable deeper and more efficient knowledge integration over new experiences. HippoRAG synergistically orchestrates LLMs, knowledge graphs, and the Personalized PageRank algorithm to mimic the different roles of neocortex and hippocampus in human memory. We compare HippoRAG with existing RAG methods on multi-hop question answering and show that our method outperforms the state-of-the-art methods remarkably, by up to 20%. Single-step retrieval with HippoRAG achieves comparable or better performance than iterative retrieval like IRCoT while being 10-30 times cheaper and 6-13 times faster, and integrating HippoRAG into IRCoT brings further substantial gains. Finally, we show that our method can tackle new types of scenarios that are out of reach of existing methods. Code and data are available at https://github.com/OSU-NLP-Group/HippoRAG.",
+  "url": "https://arxiv.org/abs/2405.14831v3"
+ },
+ {
+  "arxiv_id": "2310.11511",
+  "title": "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection",
+  "authors": [
+   "Akari Asai",
+   "Zeqiu Wu",
+   "Yizhong Wang",
+   "Avirup Sil",
+   "Hannaneh Hajishirzi"
+  ],
+  "year": 2023,
+  "abstract": "Despite their remarkable capabilities, large language models (LLMs) often produce responses containing factual inaccuracies due to their sole reliance on the parametric knowledge they encapsulate. Retrieval-Augmented Generation (RAG), an ad hoc approach that augments LMs with retrieval of relevant knowledge, decreases such issues. However, indiscriminately retrieving and incorporating a fixed number of retrieved passages, regardless of whether retrieval is necessary, or passages are relevant, diminishes LM versatility or can lead to unhelpful response generation. We introduce a new framework called Self-Reflective Retrieval-Augmented Generation (Self-RAG) that enhances an LM's quality and factuality through retrieval and self-reflection. Our framework trains a single arbitrary LM that adaptively retrieves passages on-demand, and generates and reflects on retrieved passages and its own generations using special tokens, called reflection tokens. Generating reflection tokens makes the LM controllable during the inference phase, enabling it to tailor its behavior to diverse task requirements. Experiments show that Self-RAG (7B and 13B parameters) significantly outperforms state-of-the-art LLMs and retrieval-augmented models on a diverse set of tasks. Specifically, Self-RAG outperforms ChatGPT and retrieval-augmented Llama2-chat on Open-domain QA, reasoning and fact verification tasks, and it shows significant gains in improving factuality and citation accuracy for long-form generations relative to these models.",
+  "url": "https://arxiv.org/abs/2310.11511v1"
+ },
+ {
+  "arxiv_id": "2005.11401",
+  "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+  "authors": [
+   "Patrick Lewis",
+   "Ethan Perez",
+   "Aleksandra Piktus",
+   "Fabio Petroni",
+   "Vladimir Karpukhin",
+   "Naman Goyal",
+   "Heinrich Küttler",
+   "Mike Lewis",
+   "Wen-tau Yih",
+   "Tim Rocktäschel",
+   "Sebastian Riedel",
+   "Douwe Kiela"
+  ],
+  "year": 2020,
+  "abstract": "Large pre-trained language models have been shown to store factual knowledge in their parameters, and achieve state-of-the-art results when fine-tuned on downstream NLP tasks. However, their ability to access and precisely manipulate knowledge is still limited, and hence on knowledge-intensive tasks, their performance lags behind task-specific architectures. Additionally, providing provenance for their decisions and updating their world knowledge remain open research problems. Pre-trained models with a differentiable access mechanism to explicit non-parametric memory can overcome this issue, but have so far been only investigated for extractive downstream tasks. We explore a general-purpose fine-tuning recipe for retrieval-augmented generation (RAG) -- models which combine pre-trained parametric and non-parametric memory for language generation. We introduce RAG models where the parametric memory is a pre-trained seq2seq model and the non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural retriever. We compare two RAG formulations, one which conditions on the same retrieved passages across the whole generated sequence, the other can use different passages per token. We fine-tune and evaluate our models on a wide range of knowledge-intensive NLP tasks and set the state-of-the-art on three open domain QA tasks, outperforming parametric seq2seq models and task-specific retrieve-and-extract architectures. For language generation tasks, we find that RAG models generate more specific, diverse and factual language than a state-of-the-art parametric-only seq2seq baseline.",
+  "url": "https://arxiv.org/abs/2005.11401v4"
+ },
+ {
+  "arxiv_id": "2401.15884",
+  "title": "Corrective Retrieval Augmented Generation",
+  "authors": [
+   "Shi-Qi Yan",
+   "Jia-Chen Gu",
+   "Yun Zhu",
+   "Zhen-Hua Ling"
+  ],
+  "year": 2024,
+  "abstract": "Large language models (LLMs) inevitably exhibit hallucinations since the accuracy of generated texts cannot be secured solely by the parametric knowledge they encapsulate. Although retrieval-augmented generation (RAG) is a practicable complement to LLMs, it relies heavily on the relevance of retrieved documents, raising concerns about how the model behaves if retrieval goes wrong. To this end, we propose the Corrective Retrieval Augmented Generation (CRAG) to improve the robustness of generation. Specifically, a lightweight retrieval evaluator is designed to assess the overall quality of retrieved documents for a query, returning a confidence degree based on which different knowledge retrieval actions can be triggered. Since retrieval from static and limited corpora can only return sub-optimal documents, large-scale web searches are utilized as an extension for augmenting the retrieval results. Besides, a decompose-then-recompose algorithm is designed for retrieved documents to selectively focus on key information and filter out irrelevant information in them. CRAG is plug-and-play and can be seamlessly coupled with various RAG-based approaches. Experiments on four datasets covering short- and long-form generation tasks show that CRAG can significantly improve the performance of RAG-based approaches.",
+  "url": "https://arxiv.org/abs/2401.15884v3"
+ },
+ {
+  "arxiv_id": "2401.18059",
+  "title": "RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval",
+  "authors": [
+   "Parth Sarthi",
+   "Salman Abdullah",
+   "Aditi Tuli",
+   "Shubh Khanna",
+   "Anna Goldie",
+   "Christopher D. Manning"
+  ],
+  "year": 2024,
+  "abstract": "Retrieval-augmented language models can better adapt to changes in world state and incorporate long-tail knowledge. However, most existing methods retrieve only short contiguous chunks from a retrieval corpus, limiting holistic understanding of the overall document context. We introduce the novel approach of recursively embedding, clustering, and summarizing chunks of text, constructing a tree with differing levels of summarization from the bottom up. At inference time, our RAPTOR model retrieves from this tree, integrating information across lengthy documents at different levels of abstraction. Controlled experiments show that retrieval with recursive summaries offers significant improvements over traditional retrieval-augmented LMs on several tasks. On question-answering tasks that involve complex, multi-step reasoning, we show state-of-the-art results; for example, by coupling RAPTOR retrieval with the use of GPT-4, we can improve the best performance on the QuALITY benchmark by 20% in absolute accuracy.",
+  "url": "https://arxiv.org/abs/2401.18059v1"
+ },
+ {
+  "arxiv_id": "2310.01061",
+  "title": "Reasoning on Graphs: Faithful and Interpretable Large Language Model Reasoning",
+  "authors": [
+   "Linhao Luo",
+   "Yuan-Fang Li",
+   "Gholamreza Haffari",
+   "Shirui Pan"
+  ],
+  "year": 2023,
+  "abstract": "Large language models (LLMs) have demonstrated impressive reasoning abilities in complex tasks. However, they lack up-to-date knowledge and experience hallucinations during reasoning, which can lead to incorrect reasoning processes and diminish their performance and trustworthiness. Knowledge graphs (KGs), which capture vast amounts of facts in a structured format, offer a reliable source of knowledge for reasoning. Nevertheless, existing KG-based LLM reasoning methods only treat KGs as factual knowledge bases and overlook the importance of their structural information for reasoning. In this paper, we propose a novel method called reasoning on graphs (RoG) that synergizes LLMs with KGs to enable faithful and interpretable reasoning. Specifically, we present a planning-retrieval-reasoning framework, where RoG first generates relation paths grounded by KGs as faithful plans. These plans are then used to retrieve valid reasoning paths from the KGs for LLMs to conduct faithful reasoning. Furthermore, RoG not only distills knowledge from KGs to improve the reasoning ability of LLMs through training but also allows seamless integration with any arbitrary LLMs during inference. Extensive experiments on two benchmark KGQA datasets demonstrate that RoG achieves state-of-the-art performance on KG reasoning tasks and generates faithful and interpretable reasoning results."
+ },
+ {
+  "arxiv_id": "2310.08560",
+  "title": "MemGPT: Towards LLMs as Operating Systems",
+  "authors": [
+   "Charles Packer",
+   "Sarah Wooders",
+   "Kevin Lin",
+   "Vivian Fang",
+   "Shishir G. Patil",
+   "Ion Stoica",
+   "Joseph E. Gonzalez"
+  ],
+  "year": 2023,
+  "abstract": "Large language models (LLMs) have revolutionized AI, but are constrained by limited context windows, hindering their utility in tasks like extended conversations and document analysis. To enable using context beyond limited context windows, we propose virtual context management, a technique drawing inspiration from hierarchical memory systems in traditional operating systems that provide the appearance of large memory resources through data movement between fast and slow memory. Using this technique, we introduce MemGPT (Memory-GPT), a system that intelligently manages different memory tiers in order to effectively provide extended context within the LLM's limited context window, and utilizes interrupts to manage control flow between itself and the user. We evaluate our OS-inspired design in two domains where the limited context windows of modern LLMs severely handicaps their performance: document analysis, where MemGPT is able to analyze large documents that far exceed the underlying LLM's context window, and multi-session chat, where MemGPT can create conversational agents that remember, reflect, and evolve dynamically through long-term interactions with their users. We release MemGPT code and data for our experiments at https://memgpt.ai."
+ },
+ {
+  "arxiv_id": "2408.08921",
+  "title": "Graph Retrieval-Augmented Generation: A Survey",
+  "authors": [
+   "Boci Peng",
+   "Yun Zhu",
+   "Yongchao Liu",
+   "Xiaohe Bo",
+   "Haizhou Shi",
+   "Chuntao Hong",
+   "Yan Zhang",
+   "Siliang Tang"
+  ],
+  "year": 2024,
+  "abstract": "Recently, Retrieval-Augmented Generation (RAG) has achieved remarkable success in addressing the challenges of Large Language Models (LLMs) without necessitating retraining. By referencing an external knowledge base, RAG refines LLM outputs, effectively mitigating issues such as ``hallucination'', lack of domain-specific knowledge, and outdated information. However, the complex structure of relationships among different entities in databases presents challenges for RAG systems. In response, GraphRAG leverages structural information across entities to enable more precise and comprehensive retrieval, capturing relational knowledge and facilitating more accurate, context-aware responses. Given the novelty and potential of GraphRAG, a systematic review of current technologies is imperative. This paper provides the first comprehensive overview of GraphRAG methodologies. We formalize the GraphRAG workflow, encompassing Graph-Based Indexing, Graph-Guided Retrieval, and Graph-Enhanced Generation. We then outline the core technologies and training methods at each stage. Additionally, we examine downstream tasks, application domains, evaluation methodologies, and industrial use cases of GraphRAG. Finally, we explore future research directions to inspire further inquiries and advance progress in the field. In order to track recent progress in this field, we set up a repository at \\url{https://github.com/pengboci/GraphRAG-Survey}."
+ },
+ {
+  "arxiv_id": "2510.22344",
+  "title": "FAIR-RAG: Faithful Adaptive Iterative Refinement for Retrieval-Augmented Generation",
+  "authors": [
+   "Mohammad Aghajani Asl",
+   "Majid Asgari-Bidhendi",
+   "Behrooz Minaei-Bidgoli"
+  ],
+  "year": 2025,
+  "abstract": "While Retrieval-Augmented Generation (RAG) mitigates hallucination and knowledge staleness in Large Language Models (LLMs), existing frameworks often falter on complex, multi-hop queries that require synthesizing information from disparate sources. Current advanced RAG methods, employing iterative or adaptive strategies, lack a robust mechanism to systematically identify and fill evidence gaps, often propagating noise or failing to gather a comprehensive context. We introduce FAIR-RAG, a novel agentic framework that transforms the standard RAG pipeline into a dynamic, evidence-driven reasoning process. At its core is an Iterative Refinement Cycle governed by a module we term Structured Evidence Assessment (SEA). The SEA acts as an analytical gating mechanism: it deconstructs the initial query into a checklist of required findings and audits the aggregated evidence to identify confirmed facts and, critically, explicit informational gaps. These gaps provide a precise signal to an Adaptive Query Refinement agent, which generates new, targeted sub-queries to retrieve missing information. This cycle repeats until the evidence is verified as sufficient, ensuring a comprehensive context for a final, strictly faithful generation. We conducted experiments on challenging multi-hop QA benchmarks, including HotpotQA, 2WikiMultiHopQA, and MusiQue. In a unified experimental setup, FAIR-RAG significantly outperforms strong baselines. On HotpotQA, it achieves an F1-score of 0.453 -- an absolute improvement of 8.3 points over the strongest iterative baseline -- establishing a new state-of-the-art for this class of methods on these benchmarks. Our work demonstrates that a structured, evidence-driven refinement process with explicit gap analysis is crucial for unlocking reliable and accurate reasoning in advanced RAG systems for complex, knowledge-intensive tasks."
+ },
+ {
+  "arxiv_id": "2502.17129",
+  "title": "Thus Spake Long-Context Large Language Model",
+  "authors": [
+   "Xiaoran Liu",
+   "Ruixiao Li",
+   "Mianqiu Huang",
+   "Zhigeng Liu",
+   "Yuerong Song",
+   "Qipeng Guo",
+   "Siyang He",
+   "Qiqi Wang",
+   "Linlin Li",
+   "Qun Liu",
+   "Ziwei He",
+   "Yaqian Zhou",
+   "Xuanjing Huang",
+   "Xipeng Qiu"
+  ],
+  "year": 2025,
+  "abstract": "Long context is an important topic in Natural Language Processing (NLP), running through the development of NLP architectures, and offers immense opportunities for Large Language Models (LLMs), giving LLMs the lifelong learning potential akin to humans. Unfortunately, the pursuit of a long context is accompanied by numerous obstacles. Nevertheless, long context remains a core competitive advantage for LLMs. In the past two years, the context length of LLMs has achieved a breakthrough extension to millions of tokens. Moreover, research on long-context LLMs has expanded beyond length extrapolation to a comprehensive focus on architecture, infrastructure, training, and evaluation technologies. Inspired by the symphonic poem, Thus Spake Zarathustra, we draw an analogy between the journey of extending the context of LLM and the attempts of humans to transcend their mortality. In this survey, we will illustrate how LLM struggles between the tremendous need for a longer context and its equal need to accept the fact that it is ultimately finite. To achieve this, we give a global picture of the lifecycle of long-context LLMs from four perspectives: architecture, infrastructure, training, and evaluation, showcasing the full spectrum of long-context technologies. At the end of this survey, we will present 10 unanswered questions currently faced by long-context LLMs. We hope this survey can serve as a systematic introduction to research on long-context LLMs. Video: https://www.bilibili.com/video/BV11h9AYoEYj. Github: https://github.com/OpenMOSS/Thus-Spake-Long-Context-LLM."
+ },
+ {
+  "arxiv_id": "2501.09136",
+  "title": "Agentic Retrieval-Augmented Generation: A Survey on Agentic RAG",
+  "authors": [
+   "Aditi Singh",
+   "Abul Ehtesham",
+   "Saket Kumar",
+   "Tala Talaei Khoei",
+   "Athanasios V. Vasilakos"
+  ],
+  "year": 2025,
+  "abstract": "Large Language Models (LLMs) have advanced artificial intelligence by enabling human-like text generation and natural language understanding. However, their reliance on static training data limits their ability to respond to dynamic, real-time queries, resulting in outdated or inaccurate outputs. Retrieval-Augmented Generation (RAG) has emerged as a solution, enhancing LLMs by integrating real-time data retrieval to provide contextually relevant and up-to-date responses. Despite its promise, traditional RAG systems are constrained by static workflows and lack the adaptability required for multi-step reasoning and complex task management. Agentic Retrieval-Augmented Generation (Agentic RAG) transcends these limitations by embedding autonomous AI agents into the RAG pipeline. These agents leverage agentic design patterns reflection, planning, tool use, and multi-agent collaboration to dynamically manage retrieval strategies, iteratively refine contextual understanding, and adapt workflows through operational structures ranging from sequential steps to adaptive collaboration. This integration enables Agentic RAG systems to deliver flexibility, scalability, and context-awareness across diverse applications. This paper presents an analytical survey of Agentic RAG systems. It traces the evolution of RAG paradigms, introduces a principled taxonomy of Agentic RAG architectures based on agent cardinality, control structure, autonomy, and knowledge representation, and provides a comparative analysis of design trade-offs across existing frameworks. The survey examines applications in healthcare, finance, education, and enterprise document processing, and distills practical lessons for system designers and practitioners. Finally, it identifies key open research challenges related to evaluation, coordination, memory management, efficiency, and governance, outlining directions for future research."
+ },
+ {
+  "arxiv_id": "2602.06052",
+  "title": "A Survey of Agent Memory in the Second Half: Towards Self-Evolving and Long-Horizon Agents",
+  "authors": [
+   "Wei-Chieh Huang",
+   "Weizhi Zhang",
+   "Yueqing Liang",
+   "Yuanchen Bei",
+   "Yankai Chen",
+   "Tao Feng",
+   "Xinyu Pan",
+   "Zhen Tan",
+   "Yu Wang",
+   "Tianxin Wei",
+   "Shanglin Wu",
+   "Ruiyao Xu",
+   "Liangwei Yang",
+   "Rui Yang",
+   "Wooseong Yang",
+   "Chin-Yuan Yeh",
+   "Hanrong Zhang",
+   "Haozhen Zhang",
+   "Siqi Zhu",
+   "Henry Peng Zou",
+   "Wanjia Zhao",
+   "Song Wang",
+   "Wujiang Xu",
+   "Zixuan Ke",
+   "Zheng Hui",
+   "Dawei Li",
+   "Yaozu Wu",
+   "Langzhou He",
+   "Chen Wang",
+   "Xiongxiao Xu",
+   "Baixiang Huang",
+   "Juntao Tan",
+   "Shelby Heinecke",
+   "Huan Wang",
+   "Caiming Xiong",
+   "Ahmed A. Metwally",
+   "Jun Yan",
+   "Chen-Yu Lee",
+   "Hanqing Zeng",
+   "Yinglong Xia",
+   "Xiaokai Wei",
+   "Ali Payani",
+   "Yu Wang",
+   "Haitong Ma",
+   "Wenya Wang",
+   "Chenguang Wang",
+   "Yu Zhang",
+   "Xin Eric Wang",
+   "Yongfeng Zhang",
+   "Jiaxuan You",
+   "Hanghang Tong",
+   "Xiao Luo",
+   "Xue Liu",
+   "Yizhou Sun",
+   "Wei Wang",
+   "Julian McAuley",
+   "James Zou",
+   "Jiawei Han",
+   "Philip S. Yu",
+   "Kai Shu"
+  ],
+  "year": 2026,
+  "abstract": "Research in artificial intelligence is shifting from model innovations and benchmark scores towards problem definition and rigorous real-world evaluation. As the field enters the \"second half,\" the central challenge becomes real utility in long-horizon, dynamic, and user-dependent settings such as agentic coding, deep research, and computer use, where LLM-based agents face context explosion beyond fixed context windows and must continuously accumulate, manage, and selectively reuse information across extended interactions. Memory, with hundreds of papers released in 2025, therefore emerges as the critical solution to fill this utility gap. Beyond passive storage, memory is increasingly the substrate through which agents self-evolve: short-term memory gates which experiences are perceived and abstracted during execution, while long-term memory consolidates them into reusable knowledge and skills, forming the loop through which agents improve from their own experience. In this survey, we provide a unified view of foundation agent memory along three dimensions: memory substrate (internal parametric state and external retrieval-augmented stores), cognitive mechanism (sensory, working, episodic, semantic, and procedural), and memory subject (user-centric personalization and agent-centric experience). We then analyze how memory is operated under single- and multi-agent topologies and highlight learning policies over memory operations, showing how memory management itself is becoming a trainable capability spanning reinforcement-learned context curation, experience consolidation at decision time, and the emerging ecosystem of portable, shareable agent skills. Finally, we review evaluation benchmarks and metrics for memory utility, and outline open challenges and future directions."
+ },
+ {
+  "arxiv_id": "2403.14403",
+  "title": "Adaptive-RAG: Learning to Adapt Retrieval-Augmented Large Language Models through Question Complexity",
+  "authors": [
+   "Soyeong Jeong",
+   "Jinheon Baek",
+   "Sukmin Cho",
+   "Sung Ju Hwang",
+   "Jong C. Park"
+  ],
+  "year": 2024,
+  "abstract": "Retrieval-Augmented Large Language Models (LLMs), which incorporate the non-parametric knowledge from external knowledge bases into LLMs, have emerged as a promising approach to enhancing response accuracy in several tasks, such as Question-Answering (QA). However, even though there are various approaches dealing with queries of different complexities, they either handle simple queries with unnecessary computational overhead or fail to adequately address complex multi-step queries; yet, not all user requests fall into only one of the simple or complex categories. In this work, we propose a novel adaptive QA framework, that can dynamically select the most suitable strategy for (retrieval-augmented) LLMs from the simplest to the most sophisticated ones based on the query complexity. Also, this selection process is operationalized with a classifier, which is a smaller LM trained to predict the complexity level of incoming queries with automatically collected labels, obtained from actual predicted outcomes of models and inherent inductive biases in datasets. This approach offers a balanced strategy, seamlessly adapting between the iterative and single-step retrieval-augmented LLMs, as well as the no-retrieval methods, in response to a range of query complexities. We validate our model on a set of open-domain QA datasets, covering multiple query complexities, and show that ours enhances the overall efficiency and accuracy of QA systems, compared to relevant baselines including the adaptive retrieval approaches. Code is available at: https://github.com/starsuzi/Adaptive-RAG."
+ },
+ {
+  "arxiv_id": "2410.05779",
+  "title": "LightRAG: Simple and Fast Retrieval-Augmented Generation",
+  "authors": [
+   "Zirui Guo",
+   "Lianghao Xia",
+   "Yanhua Yu",
+   "Tu Ao",
+   "Chao Huang"
+  ],
+  "year": 2024,
+  "abstract": "Retrieval-Augmented Generation (RAG) systems enhance large language models (LLMs) by integrating external knowledge sources, enabling more accurate and contextually relevant responses tailored to user needs. However, existing RAG systems have significant limitations, including reliance on flat data representations and inadequate contextual awareness, which can lead to fragmented answers that fail to capture complex inter-dependencies. To address these challenges, we propose LightRAG, which incorporates graph structures into text indexing and retrieval processes. This innovative framework employs a dual-level retrieval system that enhances comprehensive information retrieval from both low-level and high-level knowledge discovery. Additionally, the integration of graph structures with vector representations facilitates efficient retrieval of related entities and their relationships, significantly improving response times while maintaining contextual relevance. This capability is further enhanced by an incremental update algorithm that ensures the timely integration of new data, allowing the system to remain effective and responsive in rapidly changing data environments. Extensive experimental validation demonstrates considerable improvements in retrieval accuracy and efficiency compared to existing approaches. We have made our LightRAG open-source and available at the link: https://github.com/HKUDS/LightRAG"
+ },
+ {
+  "arxiv_id": "2508.05498",
+  "title": "GRAIL:Learning to Interact with Large Knowledge Graphs for Retrieval Augmented Reasoning",
+  "authors": [
+   "Ge Chang",
+   "Jinbo Su",
+   "Jiacheng Liu",
+   "Pengfei Yang",
+   "Yuhao Shang",
+   "Huiwen Zheng",
+   "Hongli Ma",
+   "Yan Liang",
+   "Yuanchun Li",
+   "Yunxin Liu"
+  ],
+  "year": 2025,
+  "abstract": "Large Language Models (LLMs) integrated with Retrieval-Augmented Generation (RAG) techniques have exhibited remarkable performance across a wide range of domains. However, existing RAG approaches primarily operate on unstructured data and demonstrate limited capability in handling structured knowledge such as knowledge graphs. Meanwhile, current graph retrieval methods fundamentally struggle to capture holistic graph structures while simultaneously facing precision control challenges that manifest as either critical information gaps or excessive redundant connections, collectively undermining reasoning performance. To address this challenge, we propose GRAIL: Graph-Retrieval Augmented Interactive Learning, a framework designed to interact with large-scale graphs for retrieval-augmented reasoning. Specifically, GRAIL integrates LLM-guided random exploration with path filtering to establish a data synthesis pipeline, where a fine-grained reasoning trajectory is automatically generated for each task. Based on the synthesized data, we then employ a two-stage training process to learn a policy that dynamically decides the optimal actions at each reasoning step. The overall objective of precision-conciseness balance in graph retrieval is decoupled into fine-grained process-supervised rewards to enhance data efficiency and training stability. In practical deployment, GRAIL adopts an interactive retrieval paradigm, enabling the model to autonomously explore graph paths while dynamically balancing retrieval breadth and precision. Extensive experiments have shown that GRAIL achieves an average accuracy improvement of 21.01% and F1 improvement of 22.43% on three knowledge graph question-answering datasets. Our source code and datasets is available at https://github.com/Changgeww/GRAIL."
+ }
+]

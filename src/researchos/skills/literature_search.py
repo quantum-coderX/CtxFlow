@@ -1,4 +1,4 @@
-"""Literature Search Skill — arXiv & Semantic Scholar API client with caching.
+"""Literature Search Skill — arXiv, Semantic Scholar & OpenAlex client with caching.
 
 Wraps external academic search APIs with:
 - Normalized query strings (lowercase, whitespace collapse)
@@ -33,6 +33,10 @@ _ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 # Semantic Scholar API constants
 _S2_BASE = "https://api.semanticscholar.org/graph/v1/paper/search"
+
+# OpenAlex API constants (keyless, polite pool via User-Agent)
+_OPENALEX_BASE = "https://api.openalex.org/works"
+_OPENALEX_UA = "ResearchOS/0.2 (https://github.com/ProjectZero24/CtxFlow)"
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +115,7 @@ class ProviderOutcome:
     status_code: Optional[int] = None
     from_cache: bool = False
     elapsed_ms: float = 0.0
+    transport: str = "http"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -122,6 +127,7 @@ class ProviderOutcome:
             "status_code": self.status_code,
             "from_cache": self.from_cache,
             "elapsed_ms": round(self.elapsed_ms, 3),
+            "transport": self.transport,
         }
 
 
@@ -509,6 +515,147 @@ def search_semantic_scholar_outcome(
     )
 
 
+def search_openalex(
+    query: str,
+    max_results: int = 5,
+) -> List[PaperResult]:
+    """Search OpenAlex (compatibility wrapper; returns results only)."""
+    return search_openalex_outcome(query, max_results=max_results).results
+
+
+def search_openalex_outcome(
+    query: str,
+    max_results: int = 5,
+    timeout: float = 30.0,
+) -> ProviderOutcome:
+    """Search OpenAlex and return an explicit provider outcome.
+
+    OpenAlex is keyless and returns abstracts as an inverted index, which is
+    reconstructed into plain text. It is the third provider in ``both`` so a
+    Semantic Scholar rate limit does not leave the demo with one source.
+    """
+    import urllib.request
+
+    started = time.monotonic()
+    params = urllib.parse.urlencode(
+        {
+            "search": query,
+            "per-page": max(1, min(max_results, 50)),
+        }
+    )
+    url = f"{_OPENALEX_BASE}?{params}"
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/json", "User-Agent": _OPENALEX_UA},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        results = _parse_openalex_response(data)
+    except ProviderParseError as exc:
+        logger.error("OpenAlex response parse failed: %s", exc)
+        return ProviderOutcome(
+            provider="openalex",
+            status=SearchStatus.ERROR,
+            error=_clean_error(exc),
+            error_type=type(exc).__name__,
+            elapsed_ms=_elapsed_ms(started),
+        )
+    except Exception as exc:
+        logger.error("OpenAlex API request failed: %s", exc)
+        return ProviderOutcome(
+            provider="openalex",
+            status=SearchStatus.ERROR,
+            error=_clean_error(exc),
+            error_type=type(exc).__name__,
+            status_code=_status_code(exc),
+            elapsed_ms=_elapsed_ms(started),
+        )
+
+    return ProviderOutcome(
+        provider="openalex",
+        status=SearchStatus.OK if results else SearchStatus.EMPTY,
+        results=results,
+        elapsed_ms=_elapsed_ms(started),
+    )
+
+
+def _reconstruct_abstract(inverted_index: Any) -> str:
+    """Rebuild abstract text from an OpenAlex ``abstract_inverted_index``."""
+    if not isinstance(inverted_index, dict):
+        return ""
+    positioned: List[tuple] = []
+    for word, positions in inverted_index.items():
+        if not isinstance(positions, list):
+            continue
+        for position in positions:
+            if isinstance(position, int):
+                positioned.append((position, str(word)))
+    positioned.sort()
+    return " ".join(word for _, word in positioned)
+
+
+def _parse_openalex_response(data: Dict[str, Any]) -> List[PaperResult]:
+    """Parse an OpenAlex works response into ``PaperResult`` objects."""
+    if not isinstance(data, dict):
+        raise ProviderParseError("OpenAlex response was not a JSON object")
+
+    works = data.get("results", [])
+    if works is None:
+        works = []
+    if not isinstance(works, list):
+        raise ProviderParseError("OpenAlex response 'results' field was not a list")
+    if "error" in data and not works:
+        raise ProviderParseError(str(data["error"]))
+
+    results: List[PaperResult] = []
+    for work in works:
+        if not isinstance(work, dict):
+            continue
+        title = " ".join(
+            str(work.get("title") or work.get("display_name") or "").split()
+        )
+        if not title:
+            continue
+
+        ids = work.get("ids") or {}
+        arxiv_url = str(ids.get("arxiv") or "")
+        arxiv_id = ""
+        if arxiv_url:
+            arxiv_id = arxiv_url.rsplit("/", 1)[-1].split("v")[0]
+
+        authors = []
+        for authorship in work.get("authorships") or []:
+            author = (authorship or {}).get("author") or {}
+            name = str(author.get("display_name") or "").strip()
+            if name:
+                authors.append(name)
+
+        location = work.get("primary_location") or {}
+        doi = str(work.get("doi") or "").replace("https://doi.org/", "")
+        url = (
+            str(location.get("landing_page_url") or "")
+            or str(work.get("doi") or "")
+            or str(work.get("id") or "")
+        )
+
+        results.append(
+            PaperResult(
+                title=title,
+                authors=authors,
+                abstract=_reconstruct_abstract(work.get("abstract_inverted_index")),
+                year=work.get("publication_year"),
+                doi=doi,
+                arxiv_id=arxiv_id,
+                url=url,
+                source="openalex",
+                metadata={"openalex_id": work.get("id") or ""},
+            )
+        )
+    return results
+
+
 def _parse_s2_response(data: Dict[str, Any]) -> List[PaperResult]:
     """Parse Semantic Scholar JSON response into PaperResult list.
 
@@ -582,12 +729,29 @@ class LiteratureSearchSkill:
         self,
         cache_dir: Optional[str] = None,
         cache_ttl: int = _DEFAULT_TTL,
+        arxiv_client: Optional[Any] = None,
     ) -> None:
         cache_path = Path(cache_dir or ".cache")
         cache_path.mkdir(parents=True, exist_ok=True)
         self._cache = _QueryCache(
             str(cache_path / "literature_cache.db"), ttl=cache_ttl
         )
+        # Optional MCP-backed arXiv client (``researchos.mcp.ArxivMCPClient``).
+        # When present, arXiv queries go through it first; any failure falls
+        # back to the plain HTTP API on the same call.
+        self._arxiv_client = arxiv_client
+        self._mcp_calls = 0
+        self._http_fallbacks = 0
+        self._last_mcp_error: Optional[str] = None
+
+    @property
+    def transport_stats(self) -> Dict[str, Any]:
+        """Counters describing how arXiv queries were served."""
+        return {
+            "mcp_calls": self._mcp_calls,
+            "http_fallbacks": self._http_fallbacks,
+            "last_mcp_error": self._last_mcp_error,
+        }
 
     def search(
         self,
@@ -619,7 +783,8 @@ class LiteratureSearchSkill:
         max_results : int
             Max results per provider.
         provider : str
-            ``"arxiv"``, ``"semantic_scholar"``, or ``"both"`` (default).
+            ``"arxiv"``, ``"semantic_scholar"``, ``"openalex"``, or ``"both"``
+            (default; queries all three).
 
         Returns
         -------
@@ -633,13 +798,13 @@ class LiteratureSearchSkill:
         normalized = (provider or "both").strip().lower()
 
         if normalized == "both":
-            providers = ["arxiv", "semantic_scholar"]
-        elif normalized in ("arxiv", "semantic_scholar"):
+            providers = ["arxiv", "semantic_scholar", "openalex"]
+        elif normalized in ("arxiv", "semantic_scholar", "openalex"):
             providers = [normalized]
         else:
             message = (
                 f"unsupported provider {provider!r}; expected "
-                "'arxiv', 'semantic_scholar', or 'both'"
+                "'arxiv', 'semantic_scholar', 'openalex', or 'both'"
             )
             logger.error(message)
             return SearchOutcome(
@@ -749,21 +914,60 @@ class LiteratureSearchSkill:
             self._cache.set(key, self._serialize_cache(outcome))
         return outcome
 
-    @staticmethod
     def _fetch_outcome(
-        provider: str, query: str, max_results: int
+        self, provider: str, query: str, max_results: int
     ) -> ProviderOutcome:
         if provider == "arxiv":
+            mcp_outcome = self._fetch_arxiv_via_mcp(query, max_results)
+            if mcp_outcome is not None:
+                return mcp_outcome
+            self._http_fallbacks += 1
             return search_arxiv_outcome(query, max_results=max_results)
         if provider == "semantic_scholar":
             return search_semantic_scholar_outcome(
                 query, max_results=max_results
             )
+        if provider == "openalex":
+            return search_openalex_outcome(query, max_results=max_results)
         return ProviderOutcome(
             provider=provider,
             status=SearchStatus.ERROR,
             error=f"unsupported provider {provider!r}",
             error_type="ValueError",
+        )
+
+    def _fetch_arxiv_via_mcp(
+        self, query: str, max_results: int
+    ) -> Optional[ProviderOutcome]:
+        """Search arXiv through the MCP client, or return ``None`` to fall back.
+
+        Failure is intentionally soft: MCP is an enhancement, so a missing
+        ``uvx``, a slow first download, or a protocol error must degrade to the
+        HTTP provider instead of failing the research run.
+        """
+        client = self._arxiv_client
+        if client is None:
+            return None
+
+        started = time.monotonic()
+        try:
+            papers = client.search(query, max_results=max_results)
+        except Exception as exc:  # noqa: BLE001 — any transport error is a fallback
+            self._last_mcp_error = _clean_error(exc)
+            logger.warning(
+                "arXiv MCP search failed (%s); falling back to the HTTP API",
+                self._last_mcp_error,
+            )
+            return None
+
+        self._mcp_calls += 1
+        self._last_mcp_error = None
+        return ProviderOutcome(
+            provider="arxiv",
+            status=SearchStatus.OK if papers else SearchStatus.EMPTY,
+            results=list(papers),
+            elapsed_ms=_elapsed_ms(started),
+            transport="mcp",
         )
 
     @staticmethod
@@ -773,6 +977,7 @@ class LiteratureSearchSkill:
             "error": outcome.error,
             "error_type": outcome.error_type,
             "status_code": outcome.status_code,
+            "transport": outcome.transport,
             "results": [_paper_to_dict(paper) for paper in outcome.results],
         })
 
@@ -834,6 +1039,7 @@ class LiteratureSearchSkill:
             error=str(payload.get("error", "") or ""),
             error_type=str(payload.get("error_type", "") or ""),
             status_code=payload.get("status_code"),
+            transport=str(payload.get("transport") or "http"),
         )
 
     def clear_cache(self) -> None:

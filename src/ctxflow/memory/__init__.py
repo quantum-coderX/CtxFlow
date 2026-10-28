@@ -33,6 +33,8 @@ from ctxflow.memory.runtime import (
     load_database_config,
 )
 from ctxflow.memory.tokens import SimpleTokenizer, TokenizerAdapter, count_tokens
+from ctxflow.memory.retention import RetentionPolicy, purge_run_events
+from ctxflow.memory.run_events import RunEvent, event_hash, verify_event_chain
 from ctxflow.llm_extractor import AtomicMemory, LLMExtractor
 from ctxflow.memory.classification import (
     ClassificationExample,
@@ -79,6 +81,11 @@ __all__ = [
     "SimpleTokenizer",
     "TokenizerAdapter",
     "count_tokens",
+    "RetentionPolicy",
+    "purge_run_events",
+    "RunEvent",
+    "event_hash",
+    "verify_event_chain",
     "AtomicMemory",
     "LLMExtractor",
     "ClassificationExample",

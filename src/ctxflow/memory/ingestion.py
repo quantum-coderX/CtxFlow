@@ -43,6 +43,7 @@ class Event:
     ts: datetime
     role: str
     content: str
+    project_id: str = "default"
     tool_name: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -100,7 +101,12 @@ class EventIngestor:
         self._edge_enrichment_failures: dict[str, bool] = {}
 
     async def ingest(self, event: Event) -> IngestResult:
-        event_hash = hashlib.sha256(event.event_id.encode("utf-8")).hexdigest()
+        hash_input = (
+            event.event_id
+            if event.project_id == "default"
+            else f"{event.project_id}:{event.event_id}"
+        )
+        event_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
         if event_hash in self._seen:
             return IngestResult(
                 event_hash,
@@ -123,6 +129,7 @@ class EventIngestor:
                 tier=MemoryTier.EPISODIC,
                 created_at=event.ts,
                 session_id=event.session_id,
+                project_id=event.project_id,
                 source=event.tool_name or event.role,
                 embedding_model=self.embedder.model,
                 embedding=embedding,

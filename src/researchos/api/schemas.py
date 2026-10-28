@@ -20,19 +20,29 @@ class ChatRequest(BaseModel):
 
     query: str = Field(..., description="Natural-language query or instruction.")
     session_id: Optional[str] = Field(
-        None, description="Session ID for conversation tracking."
+        None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._-]+$",
+        description="Session ID for conversation tracking.",
     )
+    project_id: str = Field("default", description="Research project workspace ID.")
     include_trace: bool = Field(
         False, description="Whether to include research trace in the response."
     )
     token_budget: int = Field(
-        2048, description="Token budget for context assembly."
+        2048,
+        ge=1,
+        le=100_000,
+        description="Token budget for context assembly.",
     )
 
 
 class ChatResponse(BaseModel):
     """Response to a chat query."""
 
+    run_id: str = ""
+    session_id: str = "default"
     answer: str = Field(..., description="Generated answer.")
     intent: str = Field("", description="Classified query intent.")
     cited_nodes: List[str] = Field(
@@ -127,6 +137,7 @@ class GraphStatsResponse(BaseModel):
 
     total_nodes: int = 0
     total_edges: int = 0
+    revision: int = 0
     status_distribution: Dict[str, int] = Field(default_factory=dict)
     type_distribution: Dict[str, int] = Field(default_factory=dict)
 
@@ -136,6 +147,34 @@ class GraphDataResponse(BaseModel):
 
     nodes: List[NodeResponse] = Field(default_factory=list)
     edges: List[EdgeResponse] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Demo corpus
+# ---------------------------------------------------------------------------
+
+class DemoSeedRequest(BaseModel):
+    """Request to load the checked-in demo corpus."""
+
+    project_id: str = Field("default", description="Project workspace ID.")
+
+
+class DemoSeedResponse(BaseModel):
+    """Result of loading the demo corpus (idempotent per arXiv ID)."""
+
+    success: bool = True
+    papers_ingested: int = 0
+    claims_ingested: int = 0
+    papers_skipped: int = 0
+    nodes: int = 0
+    edges: int = 0
+    project_id: str = "default"
+    relations_applied: int = 0
+    relations_already_present: int = 0
+    relations_skipped: int = 0
+    superseded_claims: int = 0
+    contested_claims: int = 0
+    message: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +252,11 @@ class SearchRequest(BaseModel):
     query: str = Field(..., description="Search query.")
     max_results: int = Field(5, description="Max results per provider.")
     provider: str = Field(
-        "both", description="Search provider: arxiv, semantic_scholar, or both."
+        "both",
+        description=(
+            "Search provider: arxiv, semantic_scholar, openalex, or both "
+            "(arxiv + semantic_scholar + openalex)."
+        ),
     )
 
 
@@ -241,6 +284,7 @@ class ProviderOutcomeResponse(BaseModel):
     status_code: Optional[int] = None
     from_cache: bool = False
     elapsed_ms: float = 0.0
+    transport: str = "http"
 
 
 class SearchResponse(BaseModel):
@@ -322,6 +366,85 @@ class HealthResponse(BaseModel):
     version: str = ""
     graph_nodes: int = 0
     graph_edges: int = 0
+    persistence: str = "memory"
+    model_enabled: bool = False
+    model_provider: Optional[str] = None
+    model_id: Optional[str] = None
+    degraded: bool = False
+
+
+class ProjectCreateRequest(BaseModel):
+    project_id: str = Field(..., min_length=1, max_length=64)
+    name: str = ""
+    description: str = ""
+
+
+class ProjectResponse(BaseModel):
+    project_id: str
+    name: str = ""
+    description: str = ""
+    created_at: float = 0.0
+    updated_at: float = 0.0
+    nodes: int = 0
+    edges: int = 0
+
+
+class ProjectListResponse(BaseModel):
+    projects: List[ProjectResponse] = Field(default_factory=list)
+
+
+class RunStartRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    project_id: str = Field("default")
+    token_budget: int = Field(2048, ge=1, le=100_000)
+
+
+class RunEventResponse(BaseModel):
+    event: str = "stage"
+    run_id: str = ""
+    stage: str = ""
+    status: str = ""
+    message: str = ""
+    ts: float = 0.0
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RunResponse(BaseModel):
+    run_id: str
+    project_id: str = "default"
+    session_id: str = "default"
+    query: str = ""
+    status: str = "queued"
+    success: Optional[bool] = None
+    engine: str = "sequential"
+    stage: str = ""
+    intent: Optional[str] = None
+    plan: List[str] = Field(default_factory=list)
+    research_plan: Dict[str, Any] = Field(default_factory=dict)
+    tasks: List[Dict[str, Any]] = Field(default_factory=list)
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
+    started_at: float = 0.0
+    ended_at: Optional[float] = None
+    answer: str = ""
+    verdict: str = ""
+    cited_nodes: List[str] = Field(default_factory=list)
+    packed_node_ids: List[str] = Field(default_factory=list)
+    excluded_node_ids: List[str] = Field(default_factory=list)
+    alerts: List[Dict[str, Any]] = Field(default_factory=list)
+    validations: List[Dict[str, Any]] = Field(default_factory=list)
+    context_usage: Dict[str, Any] = Field(default_factory=dict)
+    external_search: Optional[Dict[str, Any]] = None
+    errors: List[str] = Field(default_factory=list)
+    degraded: bool = False
+    repairs: int = 0
+    events: List[Dict[str, Any]] = Field(default_factory=list)
+    graph_nodes: int = 0
+    graph_edges: int = 0
+
+
+class RunListResponse(BaseModel):
+    runs: List[RunResponse] = Field(default_factory=list)
 
 
 class ModelUsageResponse(BaseModel):

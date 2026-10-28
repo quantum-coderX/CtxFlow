@@ -40,6 +40,34 @@ class TestDegreeCap:
         g.add_edge(Edge(source_id="a", target_id="c"))
         assert gov.can_add_edge(g, "a") is True  # Cap disabled.
 
+    def test_edge_writer_enforces_cap(self):
+        config = CtxFlowConfig(degree_cap=2, degree_cap_enabled=True)
+        gov = GovernanceEngine(config)
+        g = ContextGraph()
+        for node_id in ("a", "b", "c", "d"):
+            g.add_node(_make_node(node_id))
+
+        assert gov.add_edge(g, Edge("a", "b"))
+        assert gov.add_edge(g, Edge("a", "c"))
+        assert not gov.add_edge(g, Edge("a", "d"))
+        assert g.out_degree("a") == 2
+
+    def test_random_edge_writes_never_exceed_cap(self):
+        config = CtxFlowConfig(degree_cap=7, degree_cap_enabled=True)
+        gov = GovernanceEngine(config)
+        g = ContextGraph()
+        node_ids = [str(index) for index in range(50)]
+        for node_id in node_ids:
+            g.add_node(_make_node(node_id))
+
+        for index in range(1000):
+            source = node_ids[(index * 17) % len(node_ids)]
+            target = node_ids[(index * 31 + 1) % len(node_ids)]
+            if source != target:
+                gov.add_edge(g, Edge(source, target, relation_type=f"r{index}"))
+
+        assert all(g.out_degree(node_id) <= config.degree_cap for node_id in node_ids)
+
 
 class TestScoreNormalization:
     def test_normalization_enabled(self):

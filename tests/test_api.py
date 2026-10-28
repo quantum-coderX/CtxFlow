@@ -38,6 +38,8 @@ class TestApiEndpoints:
         assert "review_writer" in skill_names
 
     def test_paper_ingest_and_graph_data(self, test_client):
+        revision_before = test_client.get("/api/graph/stats").json()["revision"]
+
         # 1. Ingest paper
         ingest_payload = {
             "title": "Scaling Laws for Neural Language Models",
@@ -58,6 +60,7 @@ class TestApiEndpoints:
         stats = stats_res.json()
         assert stats["total_nodes"] >= 2
         assert stats["total_edges"] >= 1
+        assert stats["revision"] > revision_before
 
         # 3. Check graph data
         graph_res = test_client.get("/api/graph/data")

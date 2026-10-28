@@ -31,8 +31,19 @@ MODEL_ENV_VARS = (
 @pytest.fixture(autouse=True)
 def isolate_model_environment(monkeypatch):
     """Clear model env vars and ignore the project .env for every test."""
+    # ``researchos.api.server`` calls ``load_dotenv`` at import time. Import it
+    # here first so that side effect happens *before* the cleanup below, even
+    # when a test imports the server lazily from inside a fixture.
+    import researchos.api.server  # noqa: F401
+
     for name in MODEL_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+    # Keep the suite hermetic: no live arXiv/Semantic Scholar/OpenAlex calls and
+    # no ``uvx`` subprocess spawn. Tests that exercise those paths inject a fake
+    # client or a fake provider function.
+    monkeypatch.setenv("RESEARCHOS_EXTERNAL_SEARCH", "off")
+    monkeypatch.setenv("RESEARCHOS_MCP_ENABLED", "0")
 
     try:
         import dotenv

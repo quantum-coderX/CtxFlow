@@ -117,8 +117,24 @@ class CriticAgent(BaseAgent):
         supersession_warnings: List[Dict[str, Any]] = []
         contradiction_warnings: List[Dict[str, Any]] = []
 
+        packed_ids = context.get("packed_node_ids") or []
+        packed_set = set(packed_ids) if packed_ids else None
+
         for node_id in cited_nodes:
             validation = self._validate_node(node_id)
+            if packed_set is not None and node_id not in packed_set:
+                validation["valid"] = False
+                validation["outside_packed_context"] = True
+                alerts = alerts + [
+                    {
+                        "type": "invalid_citation",
+                        "node_id": node_id,
+                        "message": (
+                            f"Cited node [{node_id}] was not supplied in the "
+                            "packed evidence context."
+                        ),
+                    }
+                ]
             validations.append(validation)
 
             if validation.get("has_supersession"):
@@ -127,9 +143,14 @@ class CriticAgent(BaseAgent):
                 contradiction_warnings.extend(validation.get("contradictions", []))
 
         # Build verdict
+        invalid_citations = [
+            item for item in validations
+            if not item.get("exists", True) or item.get("outside_packed_context")
+        ]
         has_evidence = bool(cited_nodes)
         is_verified = (
             has_evidence
+            and not invalid_citations
             and len(supersession_warnings) == 0
             and len(contradiction_warnings) == 0
         )
@@ -157,6 +178,7 @@ class CriticAgent(BaseAgent):
                 "verdict": verdict,
                 "verified": is_verified,
                 "answer": answer,
+                "cited_nodes": list(cited_nodes),
                 "validations": validations,
                 "supersession_warnings": supersession_warnings,
                 "contradiction_warnings": contradiction_warnings,

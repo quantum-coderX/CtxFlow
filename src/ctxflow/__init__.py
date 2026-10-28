@@ -201,14 +201,13 @@ class CtxFlow:
         # 3. Explicit link (if source_id provided).
         edge_relation = relation_type or "follows"
         if source_id and self._graph.has_node(source_id):
-            if self._governance.can_add_edge(self._graph, source_id):
-                edge = Edge(
-                    source_id=source_id,
-                    target_id=node.id,
-                    relation_type=edge_relation,
-                    weight=1.0,
-                )
-                self._graph.add_edge(edge)
+            edge = Edge(
+                source_id=source_id,
+                target_id=node.id,
+                relation_type=edge_relation,
+                weight=1.0,
+            )
+            self._governance.add_edge(self._graph, edge)
 
         # 4. Implicit links (top-k tag-similar nodes).
         if self._config.max_link_k > 0:
@@ -220,14 +219,13 @@ class CtxFlow:
             )
             for similar_node, sim_score in similar:
                 # Check degree cap before linking.
-                if self._governance.can_add_edge(self._graph, node.id):
-                    edge = Edge(
-                        source_id=node.id,
-                        target_id=similar_node.id,
-                        relation_type="related_to",
-                        weight=sim_score,
-                    )
-                    self._graph.add_edge(edge)
+                edge = Edge(
+                    source_id=node.id,
+                    target_id=similar_node.id,
+                    relation_type="related_to",
+                    weight=sim_score,
+                )
+                self._governance.add_edge(self._graph, edge)
 
         # 5. Contradiction detection (if enabled).
         should_check = check_contradictions if check_contradictions is not None \
@@ -303,12 +301,28 @@ class CtxFlow:
         # Classify nodes in the chain.
         superseded: List[Node] = []
         source_papers: List[Node] = []
+        seen_superseded = set()
 
         for step in chain.steps:
             if step.node.status == NodeStatus.SUPERSEDED:
-                superseded.append(step.node)
+                if step.node.id not in seen_superseded:
+                    superseded.append(step.node)
+                    seen_superseded.add(step.node.id)
             if step.node.node_type in ("paper", "reference", "source"):
                 source_papers.append(step.node)
+
+        # A claim that *supersedes* an older claim must surface the older node
+        # even though it is not part of the backward provenance chain. The
+        # traced node itself is included because the chain only walks parents.
+        sources = {node_id} | {step.node.id for step in chain.steps}
+        for source_id in sources:
+            for edge in self._graph.get_edges_from(source_id):
+                if edge.relation_type != "supersedes":
+                    continue
+                target = self._graph.get_node(edge.target_id)
+                if target is not None and target.id not in seen_superseded:
+                    superseded.append(target)
+                    seen_superseded.add(target.id)
 
         return ResearchTrace(
             answer_node_id=node_id,

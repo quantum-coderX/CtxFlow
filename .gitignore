@@ -20,3 +20,13 @@ dist/
 # scratch notes
 s52_fixed.txt
 test456.txt
+
+# runtime data (project graphs, saved runs)
+.researchos_data/
+
+# frontend build deps
+node_modules/
+frontend/node_modules/
+
+# Local PostgreSQL backups
+ctxflow.dump

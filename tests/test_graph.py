@@ -74,6 +74,14 @@ class TestEdgeOperations:
     def test_add_edge_missing_node(self):
         edge = Edge(source_id="a", target_id="missing")
         assert self.g.add_edge(edge) is False
+
+    def test_remove_edge_returns_removed_edge(self):
+        edge = Edge(source_id="a", target_id="b", relation_type="supports")
+        self.g.add_edge(edge)
+        removed = self.g.remove_edge("a", "b")
+        assert removed is not None
+        assert removed.relation_type == "supports"
+        assert self.g.edge_count == 0
         assert self.g.edge_count == 0
 
     def test_get_edges_from(self):

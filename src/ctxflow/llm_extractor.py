@@ -152,8 +152,8 @@ class LLMExtractor(Extractor):
             if self._cache is not None and cached is None:
                 self._cache.set(key, tags)
             return set(tags[: self.max_tags])
-        except Exception:
-            logger.warning("LLM tag extraction failed, using fallback", exc_info=True)
+        except Exception as exc:
+            logger.warning("LLM tag extraction failed (%s), using fallback", exc)
             if self._fallback:
                 return self._fallback.extract_tags(text)
             # Bare-minimum fallback: split on whitespace, lowercase, dedup.
@@ -173,8 +173,8 @@ class LLMExtractor(Extractor):
                 if self._cache is not None:
                     self._cache.set(key, summary.strip())
             return summary.strip()
-        except Exception:
-            logger.warning("LLM summarization failed, using fallback", exc_info=True)
+        except Exception as exc:
+            logger.warning("LLM summarization failed (%s), using fallback", exc)
             if self._fallback:
                 return self._fallback.summarize(text)
             # Bare-minimum fallback: first 200 chars.
@@ -302,8 +302,8 @@ class LLMExtractor(Extractor):
                 if self._cache is not None:
                     self._cache.set(key, claims)
             return claims
-        except Exception:
-            logger.warning("LLM claim extraction failed", exc_info=True)
+        except Exception as exc:
+            logger.warning("LLM claim extraction failed (%s)", exc)
             # Fallback: treat the whole text as a single claim.
             return [{
                 "type": "claim",

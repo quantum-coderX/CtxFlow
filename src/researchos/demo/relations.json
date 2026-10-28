@@ -1,0 +1,30 @@
+[
+  {
+    "scenario": "unconditional-retrieval",
+    "relation": "supersedes",
+    "confidence": 0.86,
+    "old": {
+      "arxiv_id": "2005.11401",
+      "claim_contains": "set the state-of-the-art on three open domain QA tasks"
+    },
+    "new": {
+      "arxiv_id": "2403.14403",
+      "claim_contains": "they either handle simple queries with unnecessary computational overhead"
+    },
+    "rationale": "Curated demo relation between real papers: Adaptive-RAG (2024) narrows the 2020 claim that one fixed RAG recipe uniformly beats parametric baselines. The older claim is marked superseded so answers cite the current qualification. This relation is authored by the demo, not detected by the model."
+  },
+  {
+    "scenario": "retrieval-always-helps",
+    "relation": "contradicts",
+    "confidence": 0.78,
+    "old": {
+      "arxiv_id": "2005.11401",
+      "claim_contains": "generate more specific, diverse and factual language"
+    },
+    "new": {
+      "arxiv_id": "2404.16130",
+      "claim_contains": "RAG fails on global questions directed at an entire text corpus"
+    },
+    "rationale": "Curated demo relation between real papers: the 2024 graph-RAG evaluation finds RAG fails on global sensemaking questions, contesting the 2020 claim that RAG improves answer quality in general. This relation is authored by the demo, not detected by the model."
+  }
+]

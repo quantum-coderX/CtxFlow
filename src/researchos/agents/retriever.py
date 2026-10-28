@@ -9,6 +9,7 @@ LiteratureSearchSkill.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Callable, Dict, List, Optional
 
 from ctxflow import CtxFlow
@@ -22,6 +23,20 @@ from researchos.skills.literature_search import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _external_search_mode() -> str:
+    """Read the external-search policy: ``auto`` (default), ``off``, ``force``.
+
+    ``off`` keeps the demo deterministic and offline-safe: graph-only answers,
+    no live provider calls. ``force`` always queries providers after the graph.
+    """
+    raw = str(os.environ.get("RESEARCHOS_EXTERNAL_SEARCH", "auto")).strip().lower()
+    if raw in {"off", "0", "false", "no", "disabled"}:
+        return "off"
+    if raw in {"force", "always", "1", "true", "yes"}:
+        return "force"
+    return "auto"
 
 
 class RetrieverAgent(BaseAgent):
@@ -72,7 +87,8 @@ class RetrieverAgent(BaseAgent):
         """
         query: str = kwargs.get("query", "")
         max_results: int = kwargs.get("max_results", 10)
-
+        # The workflow runs external search itself (planned, parallel workers).
+        skip_external: bool = bool(kwargs.get("skip_external", False))
         if not query:
             return AgentResult(
                 agent_name=self.name,
@@ -87,6 +103,10 @@ class RetrieverAgent(BaseAgent):
 
         # 2. Evaluate knowledge sufficiency
         has_gap = self._has_knowledge_gap(internal_results)
+        mode = _external_search_mode()
+        search_enabled = mode != "off"
+        if mode == "force":
+            has_gap = True
 
         result_data: Dict[str, Any] = {
             "internal_results": [
@@ -96,7 +116,11 @@ class RetrieverAgent(BaseAgent):
                     "summary": r.summary,
                     "score": r.score,
                     "node_type": r.node_type,
-                    "status": r.status,
+                    "status": (
+                        r.status.value
+                        if hasattr(r.status, "value")
+                        else str(r.status)
+                    ),
                     "tags": r.tags,
                 }
                 for r in internal_results
@@ -105,7 +129,7 @@ class RetrieverAgent(BaseAgent):
         }
 
         # 3. If gap detected, search externally
-        if has_gap and self._search_skill:
+        if has_gap and self._search_skill and search_enabled and not skip_external:
             logger.info(
                 "Knowledge gap detected for '%s', searching externally",
                 query[:80],
@@ -139,7 +163,7 @@ class RetrieverAgent(BaseAgent):
         else:
             result_data["external_results"] = []
             result_data["external_search"] = {
-                "status": "skipped",
+                "status": "disabled" if has_gap and not search_enabled else "skipped",
                 "provider": "none",
                 "result_count": 0,
                 "errors": {},

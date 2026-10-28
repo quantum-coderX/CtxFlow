@@ -1,0 +1,12 @@
+{"id":"demo-01","content":"Graph memory stores research observations as linked context units.","node_type":"concept","tags":["memory","graph"]}
+{"id":"demo-02","content":"Stable node identifiers make provenance traces auditable across runs.","node_type":"principle","tags":["memory","provenance"]}
+{"id":"demo-03","content":"Project scope prevents retrieval from crossing workspace boundaries.","node_type":"principle","tags":["isolation","memory"]}
+{"id":"demo-04","content":"Append-only events record changes to stored beliefs.","node_type":"principle","tags":["audit","events"]}
+{"id":"demo-05","content":"Token estimates allow context selection to respect a fixed budget.","node_type":"capability","tags":["retrieval","tokens"]}
+{"id":"demo-06","content":"Supersession preserves historical records while replacing current truth.","node_type":"capability","tags":["supersession","history"]}
+{"id":"demo-07","content":"Offline compaction removes stale nodes without delaying user queries.","node_type":"maintenance","tags":["compaction","performance"]}
+{"id":"demo-08","content":"A degree cap limits the number of outgoing graph relationships.","node_type":"governance","tags":["governance","graph"]}
+{"id":"demo-09","content":"Deterministic ranking makes retrieval results explainable and testable.","node_type":"retrieval","tags":["retrieval","determinism"]}
+{"id":"demo-10","content":"Backup and restore rehearsal verifies persistence after a restart.","node_type":"operations","tags":["backup","durability"]}
+{"id":"demo-11","content":"Graph statistics expose node counts, edge counts, and tag coverage.","node_type":"operations","tags":["stats","observability"]}
+{"id":"demo-12","content":"A reproducible corpus makes memory-footprint measurements comparable.","node_type":"operations","tags":["benchmark","memory"]}

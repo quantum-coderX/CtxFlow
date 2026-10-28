@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from researchos.api.graph_revision import bump_graph_revision
 from researchos.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -18,6 +20,7 @@ from researchos.api.schemas import (
     SearchResponse,
     SearchResultResponse,
 )
+from researchos.persistence import new_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +54,41 @@ async def chat(request: ChatRequest) -> ChatResponse:
     if skill_router is None:
         raise HTTPException(503, detail="Agent router not initialized")
 
+    workspace = _app_state.get("workspace")
+    run_id = new_run_id()
+    session_id = request.session_id or "default"
+    started_at = time.time()
+    conversation_history = (
+        workspace.conversation_history(request.project_id, session_id)
+        if workspace is not None
+        else []
+    )
+
     try:
-        result = skill_router.run(query=request.query)
+        if workspace is not None:
+            workspace.save_run(
+                {
+                    "run_id": run_id,
+                    "project_id": request.project_id,
+                    "session_id": session_id,
+                    "query": request.query,
+                    "status": "running",
+                    "success": None,
+                    "started_at": started_at,
+                    "ended_at": None,
+                    "answer": "",
+                }
+            )
+        result = skill_router.run(
+            query=request.query,
+            context={
+                "token_budget": request.token_budget,
+                "conversation_history": conversation_history,
+            },
+        )
+        bump_graph_revision(request.project_id)
+        if workspace is not None:
+            workspace.save_graph(request.project_id)
 
         data = result.data or {}
         pipeline_result = data.get("result", {}) or {}
@@ -84,7 +120,34 @@ async def chat(request: ChatRequest) -> ChatResponse:
                     "source_paper_count": len(trace_obj.source_papers),
                 }
 
+        if workspace is not None:
+            workspace.save_run(
+                {
+                    "run_id": run_id,
+                    "project_id": request.project_id,
+                    "session_id": session_id,
+                    "query": request.query,
+                    "status": "completed" if result.success else "failed",
+                    "success": result.success,
+                    "started_at": started_at,
+                    "ended_at": time.time(),
+                    "answer": answer,
+                    "intent": data.get("intent", ""),
+                    "cited_nodes": cited_nodes,
+                    "alerts": alerts,
+                    "context_usage": result.metadata.get("context_usage", {}),
+                    "external_search": external_search,
+                    "errors": [
+                        item.get("error", "")
+                        for item in data.get("pipeline_results", [])
+                        if not item.get("success")
+                    ],
+                }
+            )
+
         return ChatResponse(
+            run_id=run_id,
+            session_id=session_id,
             answer=answer,
             intent=data.get("intent", ""),
             cited_nodes=cited_nodes,
@@ -94,6 +157,24 @@ async def chat(request: ChatRequest) -> ChatResponse:
             external_search=external_search,
         )
     except Exception as exc:
+        if workspace is not None:
+            try:
+                workspace.save_run(
+                    {
+                        "run_id": run_id,
+                        "project_id": request.project_id,
+                        "session_id": session_id,
+                        "query": request.query,
+                        "status": "failed",
+                        "success": False,
+                        "started_at": started_at,
+                        "ended_at": time.time(),
+                        "answer": "",
+                        "errors": [str(exc)],
+                    }
+                )
+            except Exception:
+                logger.exception("Could not persist failed chat request")
         logger.error("Chat endpoint failed: %s", exc, exc_info=True)
         raise HTTPException(500, detail=str(exc))
 
