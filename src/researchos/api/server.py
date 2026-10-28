@@ -28,7 +28,7 @@ except ImportError:
     pass  # python-dotenv optional — set env vars manually if not installed
 # ──────────────────────────────────────────────────────────────────────────────
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
@@ -454,6 +454,12 @@ def create_app(
         request: Request,
         token_budget: int = 2048,
         project_id: str = "default",
+        session_id: str = Query(
+            "default",
+            min_length=1,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._-]+$",
+        ),
     ):
         """SSE streaming endpoint — 8-stage research execution.
 
@@ -475,6 +481,27 @@ def create_app(
             raise HTTPException(503, detail="Workspace not initialized")
 
         run_id = new_run_id()
+        started_at = time.time()
+        conversation_history = ws.conversation_history(project_id, session_id)
+        try:
+            ws.save_run(
+                {
+                    "run_id": run_id,
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "query": query,
+                    "status": "running",
+                    "success": None,
+                    "started_at": started_at,
+                    "ended_at": None,
+                    "answer": "",
+                }
+            )
+        except Exception as exc:
+            logger.exception("Failed to persist incoming research prompt")
+            raise HTTPException(
+                500, detail="Could not persist the conversation prompt."
+            ) from exc
         project_graph = ws.get_graph(project_id)
 
         def _save_graph() -> None:
@@ -502,14 +529,49 @@ def create_app(
         result_holder: Dict[str, Any] = {}
 
         def _run_workflow() -> None:
-            result = workflow.run(
-                query=query,
-                run_id=run_id,
-                project_id=project_id,
-                token_budget=max(1, int(token_budget)),
-                on_event=on_event,
-                cancel_event=cancel_event,
-            )
+            try:
+                result = workflow.run(
+                    query=query,
+                    run_id=run_id,
+                    project_id=project_id,
+                    session_id=session_id,
+                    conversation_history=conversation_history,
+                    token_budget=max(1, int(token_budget)),
+                    on_event=on_event,
+                    cancel_event=cancel_event,
+                )
+            except Exception as exc:
+                logger.exception("Research workflow raised outside its failure handler")
+                result = {
+                    "run_id": run_id,
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "query": query,
+                    "status": "failed",
+                    "success": False,
+                    "answer": "",
+                    "errors": [str(exc)],
+                    "alerts": [],
+                    "events": [],
+                }
+            result["session_id"] = session_id
+            result["started_at"] = started_at
+            result["ended_at"] = time.time()
+            try:
+                ws.save_run(result)
+            except Exception:
+                logger.exception("Failed to persist completed research run")
+                result["degraded"] = True
+                result["status"] = "degraded" if result.get("success") else "failed"
+                result["errors"] = list(result.get("errors") or []) + [
+                    "Conversation history could not be updated with the final answer."
+                ]
+                result["alerts"] = list(result.get("alerts") or []) + [
+                    {
+                        "type": "persistence",
+                        "message": "The answer was generated but could not be saved to conversation history.",
+                    }
+                ]
             result_holder["result"] = result
             loop.call_soon_threadsafe(event_queue.put_nowait, None)  # sentinel
 
@@ -524,6 +586,7 @@ def create_app(
                     "run_id": run_id,
                     "query": query,
                     "project_id": project_id,
+                    "session_id": session_id,
                     "engine": getattr(workflow, "engine", "sequential"),
                     "message": "Workflow started",
                 }),
@@ -554,22 +617,11 @@ def create_app(
             # Emit final done event
             result = result_holder.get("result") or {}
 
-            # Persist the run record
-            if ws:
-                try:
-                    record = {
-                        "started_at": result.get("events", [{}])[0].get("ts", time.time()) if result.get("events") else time.time(),
-                        "ended_at": time.time(),
-                        **{k: v for k, v in result.items()},
-                    }
-                    ws.save_run(record)
-                except Exception as exc:
-                    logger.warning("Failed to save run record: %s", exc)
-
             yield {
                 "event": "done",
                 "data": json.dumps(redact_secrets({
                     "run_id": run_id,
+                    "session_id": session_id,
                     "status": result.get("status", "unknown"),
                     "success": result.get("success", False),
                     "engine": result.get("engine", getattr(workflow, "engine", "sequential")),

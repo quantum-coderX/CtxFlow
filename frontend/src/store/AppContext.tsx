@@ -50,6 +50,7 @@ type Action =
   | { type: "SET_PROJECTS"; payload: ProjectMeta[] }
   | { type: "ADD_PROJECT"; payload: ProjectMeta }
   | { type: "SET_PROJECT"; payload: string }
+  | { type: "RESTORE_CONVERSATION"; payload: ChatMessage[] }
   | { type: "ADD_MESSAGE"; payload: ChatMessage }
   | { type: "UPDATE_MESSAGE"; id: string; patch: Partial<ChatMessage> }
   | { type: "SET_BUSY"; payload: boolean }
@@ -93,7 +94,20 @@ function reducer(state: AppState, action: Action): AppState {
     case "SET_PROJECTS":  return { ...state, projects: action.payload };
     case "ADD_PROJECT":   return { ...state, projects: [...state.projects, action.payload] };
     case "SET_PROJECT":   return { ...state, currentProjectId: action.payload, messages: [], runs: [], stageState: {}, tasks: [] };
-    case "ADD_MESSAGE":   return { ...state, messages: [...state.messages, action.payload] };
+    case "RESTORE_CONVERSATION": {
+      const byId = new Map<string, ChatMessage>();
+      for (const message of [...action.payload, ...state.messages]) {
+        byId.set(message.id, message);
+      }
+      return {
+        ...state,
+        messages: [...byId.values()].sort((left, right) => left.timestamp - right.timestamp),
+      };
+    }
+    case "ADD_MESSAGE":
+      return state.messages.some((message) => message.id === action.payload.id)
+        ? state
+        : { ...state, messages: [...state.messages, action.payload] };
     case "UPDATE_MESSAGE":
       return {
         ...state,

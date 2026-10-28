@@ -118,6 +118,33 @@ class TestSynthesizerAgent:
         assert "AdamW" in res.data["answer"]
         assert len(res.data["cited_nodes"]) >= 1
 
+    def test_synthesizer_uses_bounded_history_for_follow_up_without_graph_evidence(self):
+        prompts = []
+
+        def llm(prompt, system=""):
+            prompts.append(prompt)
+            return "The prior response recommended checking the retrieval cost."
+
+        synthesizer = SynthesizerAgent(ctxflow=CtxFlow(), llm=llm)
+        result = synthesizer.run(
+            query="What did you recommend checking?",
+            context={
+                "token_budget": 256,
+                "conversation_history": [
+                    {
+                        "query": "How does the system trade off retrieval quality and cost?",
+                        "answer": "The prior response recommended checking the retrieval cost.",
+                    }
+                ],
+            },
+        )
+
+        assert result.success is True
+        assert "retrieval cost" in prompts[0]
+        assert "untrusted" in prompts[0]
+        assert result.data["cited_nodes"] == []
+        assert result.metadata["tokens_used"] <= result.metadata["token_budget"]
+
 
 class TestCriticAgent:
     """Tests for CriticAgent contradiction and supersession detection."""

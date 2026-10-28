@@ -20,7 +20,11 @@ class ChatRequest(BaseModel):
 
     query: str = Field(..., description="Natural-language query or instruction.")
     session_id: Optional[str] = Field(
-        None, description="Session ID for conversation tracking."
+        None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._-]+$",
+        description="Session ID for conversation tracking.",
     )
     project_id: str = Field("default", description="Research project workspace ID.")
     include_trace: bool = Field(
@@ -37,6 +41,8 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response to a chat query."""
 
+    run_id: str = ""
+    session_id: str = "default"
     answer: str = Field(..., description="Generated answer.")
     intent: str = Field("", description="Classified query intent.")
     cited_nodes: List[str] = Field(
@@ -405,6 +411,7 @@ class RunEventResponse(BaseModel):
 class RunResponse(BaseModel):
     run_id: str
     project_id: str = "default"
+    session_id: str = "default"
     query: str = ""
     status: str = "queued"
     success: Optional[bool] = None

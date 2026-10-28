@@ -28,11 +28,16 @@ def _workspace():
 @router.get("/runs", response_model=RunListResponse)
 async def list_runs(
     project_id: Optional[str] = None,
+    session_id: Optional[str] = None,
     limit: int = 50,
 ) -> RunListResponse:
-    """List saved research runs, optionally filtered by project."""
+    """List saved research runs, optionally filtered by project and session."""
     ws = _workspace()
-    records = ws.list_runs(project_id=project_id, limit=limit)
+    records = ws.list_runs(
+        project_id=project_id,
+        limit=limit,
+        session_id=session_id,
+    )
     runs = []
     for rec in records:
         try:
