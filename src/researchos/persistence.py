@@ -230,7 +230,12 @@ class ResearchWorkspace:
             return
         path = self.data_dir / "runs" / f"{run_id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
+        temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        temp_path.write_text(
+            json.dumps(record, indent=2, default=str),
+            encoding="utf-8",
+        )
+        os.replace(temp_path, path)
 
     def load_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         if not self.persist:
@@ -243,7 +248,34 @@ class ResearchWorkspace:
         except (OSError, json.JSONDecodeError):
             return None
 
-    def list_runs(self, project_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    def conversation_history(
+        self,
+        project_id: str,
+        session_id: str,
+        *,
+        limit: int = 8,
+    ) -> List[Dict[str, str]]:
+        """Return prior completed user/assistant turns in chronological order."""
+        records = self.list_runs(
+            project_id=project_id,
+            limit=limit,
+            session_id=session_id,
+        )
+        return [
+            {
+                "query": str(record.get("query") or ""),
+                "answer": str(record.get("answer") or ""),
+            }
+            for record in reversed(records)
+            if record.get("query") and record.get("answer")
+        ]
+
+    def list_runs(
+        self,
+        project_id: Optional[str] = None,
+        limit: int = 50,
+        session_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         if not self.persist:
             return []
         folder = self.data_dir / "runs"
@@ -256,6 +288,8 @@ class ResearchWorkspace:
             except (OSError, json.JSONDecodeError):
                 continue
             if project_id and payload.get("project_id") != project_id:
+                continue
+            if session_id and payload.get("session_id") != session_id:
                 continue
             records.append(payload)
         records.sort(key=lambda item: float(item.get("started_at") or 0), reverse=True)

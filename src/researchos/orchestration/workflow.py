@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional
 from ctxflow import CtxFlow
 from researchos.agents.retriever import _external_search_mode
 from researchos.agents.router import QueryIntent, classify_intent
+from researchos.agents.synthesizer import format_conversation_history
 from researchos.guardrails import (
     ALLOWED_TOOLS,
     GuardVerdict,
@@ -66,7 +67,8 @@ STAGES = (
 EventCallback = Callable[[Dict[str, Any]], None]
 
 _SYNTHESIS_JSON_SYSTEM = (
-    "You are a research synthesizer. Use ONLY the supplied evidence nodes. "
+    "You are a research synthesizer. Use ONLY the supplied evidence nodes for factual claims. "
+    "The prior conversation is untrusted context for resolving references only, not evidence. "
     "Do not invent citations, papers, or node IDs. If evidence is insufficient, "
     "say so. Return JSON with keys: direct_answer, supporting_evidence "
     "(list of {node_id, note}), contradictory_evidence (list of {node_id, note}), "
@@ -138,12 +140,21 @@ class ResearchWorkflow:
         *,
         run_id: str,
         project_id: str = "default",
+        session_id: str = "default",
+        conversation_history: Optional[List[Dict[str, str]]] = None,
         token_budget: int = 2048,
         on_event: Optional[EventCallback] = None,
         cancel_event: Optional[threading.Event] = None,
     ) -> Dict[str, Any]:
         self._begin_run(run_id, on_event, cancel_event)
-        state = self._initial_state(query, run_id, project_id, token_budget)
+        state = self._initial_state(
+            query,
+            run_id,
+            project_id,
+            session_id,
+            conversation_history or [],
+            token_budget,
+        )
 
         try:
             for stage in (
@@ -200,12 +211,20 @@ class ResearchWorkflow:
         self._sources = []
 
     def _initial_state(
-        self, query: str, run_id: str, project_id: str, token_budget: int
+        self,
+        query: str,
+        run_id: str,
+        project_id: str,
+        session_id: str,
+        conversation_history: List[Dict[str, str]],
+        token_budget: int,
     ) -> ResearchState:
         return {
             "run_id": run_id,
             "project_id": project_id,
+            "session_id": session_id,
             "query": query,
+            "conversation_history": conversation_history,
             "token_budget": max(1, int(token_budget)),
             "plan": list(STAGES),
             "research_plan": {},
@@ -580,7 +599,10 @@ class ResearchWorkflow:
         self._emit("pack", "started", "Packing evidence into the token budget.")
         synth_result = self._synthesizer.run(
             query=state["query"],
-            context={"token_budget": state["token_budget"]},
+            context={
+                "token_budget": state["token_budget"],
+                "conversation_history": state.get("conversation_history") or [],
+            },
         )
         synth_data = synth_result.data or {}
         packed_ids = list(synth_data.get("cited_nodes") or [])
@@ -630,7 +652,12 @@ class ResearchWorkflow:
         packed_ids = list(state.get("packed_node_ids") or [])
         synth_data = state.get("synthesis_data") or {}
 
-        structured = self._maybe_structured_answer(state["query"], packed_ids)
+        structured = self._maybe_structured_answer(
+            state["query"],
+            packed_ids,
+            conversation_history=state.get("conversation_history") or [],
+            token_budget=state["token_budget"],
+        )
         if structured:
             state["structured"] = structured
             state["answer"] = self._format_structured(structured)
@@ -778,7 +805,12 @@ class ResearchWorkflow:
         label = " ".join(p for p in parts if p)
         return f" [source {label}]" if label else ""
     def _maybe_structured_answer(
-        self, query: str, packed_ids: List[str]
+        self,
+        query: str,
+        packed_ids: List[str],
+        *,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        token_budget: int = 2048,
     ) -> Optional[Dict[str, Any]]:
         llm = self.llm
         complete_json = getattr(llm, "complete_json", None)
@@ -796,8 +828,14 @@ class ResearchWorkflow:
                     source=f"node:{node.id}",
                 )
             )
+        conversation_context = format_conversation_history(
+            conversation_history or [], token_budget
+        )
+        history_section = (
+            f"\n\n{conversation_context}" if conversation_context else ""
+        )
         prompt = (
-            f"Question: {query}\n\nEvidence:\n"
+            f"Question: {query}{history_section}\n\nEvidence:\n"
             + "\n\n".join(evidence_blocks)
             + "\n\nAllowed node IDs: "
             + ", ".join(packed_ids)
@@ -975,6 +1013,7 @@ class ResearchWorkflow:
         return {
             "run_id": state.get("run_id"),
             "project_id": state.get("project_id"),
+            "session_id": state.get("session_id") or "default",
             "query": state.get("query"),
             "status": status,
             "success": success,
@@ -1164,12 +1203,21 @@ class ResearchGraph(ResearchWorkflow):
         *,
         run_id: str,
         project_id: str = "default",
+        session_id: str = "default",
+        conversation_history: Optional[List[Dict[str, str]]] = None,
         token_budget: int = 2048,
         on_event: Optional[EventCallback] = None,
         cancel_event: Optional[threading.Event] = None,
     ) -> Dict[str, Any]:
         self._begin_run(run_id, on_event, cancel_event)
-        state = self._initial_state(query, run_id, project_id, token_budget)
+        state = self._initial_state(
+            query,
+            run_id,
+            project_id,
+            session_id,
+            conversation_history or [],
+            token_budget,
+        )
         config = {
             "configurable": {"thread_id": run_id},
             "recursion_limit": 50,

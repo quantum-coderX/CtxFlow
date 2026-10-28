@@ -3,6 +3,7 @@ import { useApp } from "../store/AppContext";
 import type { ChatMessage, ResearchPlan, TaskProgress, WorkflowEvent } from "../types";
 import { WORKFLOW_STAGES } from "../types";
 import { api } from "../api";
+import { getConversationSessionId } from "../session";
 
 let msgCounter = 0;
 const uid = () => `msg-${Date.now()}-${++msgCounter}`;
@@ -58,6 +59,7 @@ export function useWorkflow() {
       const params = new URLSearchParams({
         query,
         project_id: state.currentProjectId,
+        session_id: getConversationSessionId(state.currentProjectId),
         token_budget: "2048",
       });
 
@@ -157,7 +159,10 @@ export function useWorkflow() {
         dispatch({ type: "SET_BUSY", payload: false });
 
         // Refresh runs list
-        api.runs.list(state.currentProjectId).then((runs) =>
+        api.runs.list(
+          state.currentProjectId,
+          getConversationSessionId(state.currentProjectId),
+        ).then((runs) =>
           dispatch({ type: "SET_RUNS", payload: runs })
         ).catch(() => {});
       };

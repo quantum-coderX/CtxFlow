@@ -29,7 +29,9 @@ RunStatus = Literal[
 class ResearchState(TypedDict, total=False):
     run_id: str
     project_id: str
+    session_id: str
     query: str
+    conversation_history: List[Dict[str, str]]
     intent: str
     plan: List[str]
     token_budget: int

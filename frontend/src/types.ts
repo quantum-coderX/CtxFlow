@@ -13,6 +13,7 @@ export interface ProjectMeta {
 export interface RunRecord {
   run_id: string;
   project_id: string;
+  session_id?: string;
   query: string;
   status: string;
   stage?: string;

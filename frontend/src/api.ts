@@ -44,9 +44,10 @@ export const api = {
   },
 
   runs: {
-    list: (project_id?: string, limit = 20) => {
+    list: (project_id?: string, session_id?: string, limit = 100) => {
       const qs = new URLSearchParams({ limit: String(limit) });
       if (project_id) qs.set("project_id", project_id);
+      if (session_id) qs.set("session_id", session_id);
       return request<{ runs: RunRecord[] }>(`/api/runs?${qs}`).then(
         (d) => d.runs
       );

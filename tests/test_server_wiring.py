@@ -177,6 +177,36 @@ class TestRunsAPI:
         assert r.status_code == 200
         assert "runs" in r.json()
 
+    def test_chat_endpoint_persists_prompt_and_synthesized_answer(
+        self, client, workspace
+    ):
+        graph = workspace.get_graph("default")
+        graph.ingest(
+            "CtxFlow stores research claims in a project-scoped graph.",
+            node_type="claim",
+            tags={"ctxflow", "research"},
+        )
+        response = client.post(
+            "/api/chat",
+            json={
+                "query": "What does CtxFlow store?",
+                "session_id": "legacy-chat-session",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["run_id"]
+        assert payload["session_id"] == "legacy-chat-session"
+        assert payload["answer"]
+        records = workspace.list_runs(
+            project_id="default",
+            session_id="legacy-chat-session",
+        )
+        assert len(records) == 1
+        assert records[0]["query"] == "What does CtxFlow store?"
+        assert records[0]["answer"] == payload["answer"]
+
     def test_list_runs_after_streaming(self, client):
         """After a successful SSE run, it should appear in /api/runs."""
         # Consume the full stream
@@ -193,6 +223,48 @@ class TestRunsAPI:
         assert r.status_code == 200
         data = r.json()
         assert isinstance(data["runs"], list)
+
+    def test_stream_persists_prompt_answer_and_session_scope(self, client, workspace):
+        session_id = "browser-session-a"
+        with client.stream(
+            "GET",
+            "/api/stream?query=Persist%20this%20conversation%20turn"
+            f"&project_id=conversation-test&session_id={session_id}",
+        ) as response:
+            assert response.status_code == 200
+            for _ in response.iter_lines():
+                pass
+
+        records = workspace.list_runs(
+            project_id="conversation-test",
+            session_id=session_id,
+        )
+        assert len(records) == 1
+        assert records[0]["query"] == "Persist this conversation turn"
+        assert records[0]["answer"]
+        assert records[0]["session_id"] == session_id
+        assert records[0]["status"] in {"completed", "degraded"}
+
+        other_session = client.get(
+            "/api/runs",
+            params={
+                "project_id": "conversation-test",
+                "session_id": "browser-session-b",
+            },
+        )
+        assert other_session.status_code == 200
+        assert other_session.json()["runs"] == []
+
+        same_session = client.get(
+            "/api/runs",
+            params={
+                "project_id": "conversation-test",
+                "session_id": session_id,
+            },
+        )
+        assert same_session.status_code == 200
+        assert len(same_session.json()["runs"]) == 1
+        assert same_session.json()["runs"][0]["answer"] == records[0]["answer"]
 
     def test_get_run_not_found(self, client):
         r = client.get("/api/runs/nonexistent-run-id-999")

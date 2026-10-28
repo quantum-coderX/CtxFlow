@@ -218,6 +218,34 @@ def test_follow_up_reuses_memory_without_searching_again(engine):
 
 
 @pytest.mark.parametrize("engine", ENGINES)
+def test_follow_up_conversation_history_reaches_synthesizer(engine, monkeypatch):
+    monkeypatch.setenv("RESEARCHOS_EXTERNAL_SEARCH", "off")
+    prompts = []
+
+    def llm(prompt, system=""):
+        prompts.append(prompt)
+        return "The prior response discussed graph memory limitations."
+
+    workflow = make(engine, CtxFlow(), llm=llm)
+    result = workflow.run(
+        "What limitations did you mention?",
+        run_id="conversation-follow-up",
+        project_id="p",
+        session_id="session-a",
+        conversation_history=[
+            {
+                "query": "Compare graph memory and vector retrieval.",
+                "answer": "Graph memory preserves relations but has construction costs.",
+            }
+        ],
+    )
+
+    assert result["session_id"] == "session-a"
+    assert result["answer"] == "The prior response discussed graph memory limitations."
+    assert any("construction costs" in prompt for prompt in prompts)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
 def test_partial_provider_failure_is_degraded_but_keeps_valid_citations(engine):
     ctx = CtxFlow()
     result, events = run(make(engine, ctx, FakeAcademic(fail={"openalex"}), FakeWeb(), FakeFetch()))
