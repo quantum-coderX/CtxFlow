@@ -2,6 +2,8 @@
 
 import type {
   HealthResponse,
+  GraphData,
+  GraphStats,
   ProjectMeta,
   RunRecord,
   TraceResponse,
@@ -90,4 +92,17 @@ export const api = {
 
   trace: (node_id: string, project_id: string) =>
     post<TraceResponse>(`/api/trace?project_id=${encodeURIComponent(project_id)}`, { node_id }),
+
+  graph: {
+    stats: (project_id: string) =>
+      request<GraphStats>(
+        `/api/graph/stats?project_id=${encodeURIComponent(project_id)}`,
+        { cache: "no-store" }
+      ),
+    data: (project_id: string) =>
+      request<GraphData>(
+        `/api/graph/data?project_id=${encodeURIComponent(project_id)}`,
+        { cache: "no-store" }
+      ),
+  },
 };

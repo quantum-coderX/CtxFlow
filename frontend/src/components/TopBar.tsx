@@ -58,8 +58,8 @@ export function TopBar() {
         )}
 
         <div className="graph-stats">
-          <span><strong>{h?.graph_nodes ?? 0}</strong> nodes</span>
-          <span><strong>{h?.graph_edges ?? 0}</strong> edges</span>
+          <span><strong>{state.graphStats?.total_nodes ?? h?.graph_nodes ?? 0}</strong> nodes</span>
+          <span><strong>{state.graphStats?.total_edges ?? h?.graph_edges ?? 0}</strong> edges</span>
         </div>
 
         <div className="status-pill">

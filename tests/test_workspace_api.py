@@ -37,6 +37,9 @@ class TestWorkspaceUI:
 
 class TestNotes:
     def test_create_and_list_notes(self, client):
+        other_revision_before = client.get(
+            "/api/graph/stats?project_id=other"
+        ).json()["revision"]
         created = client.post(
             "/api/notes",
             json={
@@ -57,10 +60,16 @@ class TestNotes:
         data = listed.json()
         assert data["total"] == 1
         assert data["notes"][0]["title"] == "Leakage hypothesis"
+        graph = client.get("/api/graph/data?project_id=thesis").json()
+        assert any(node["id"] == note["node_id"] for node in graph["nodes"])
+        revision = client.get("/api/graph/stats?project_id=thesis").json()["revision"]
+        assert revision > 0
 
         # Project isolation.
         other = client.get("/api/notes?project_id=other").json()
         assert other["total"] == 0
+        other_graph = client.get("/api/graph/stats?project_id=other").json()
+        assert other_graph["revision"] == other_revision_before
 
 
 class TestRoutingAgents:

@@ -46,6 +46,7 @@ from researchos.api.routes import notes as notes_routes
 from researchos.api.routes import papers as papers_routes
 from researchos.api.routes import projects as projects_routes
 from researchos.api.routes import runs as runs_routes
+from researchos.api.graph_revision import bump_graph_revision
 from researchos.api.schemas import (
     HealthResponse,
     ModelUsageResponse,
@@ -505,6 +506,7 @@ def create_app(
         project_graph = ws.get_graph(project_id)
 
         def _save_graph() -> None:
+            bump_graph_revision(project_id)
             ws.save_graph(project_id)
 
         workflow = build_orchestrator(

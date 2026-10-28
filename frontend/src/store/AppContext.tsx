@@ -5,6 +5,7 @@ import type {
   ProjectMeta,
   RunRecord,
   HealthResponse,
+  GraphStats,
   StageState,
   TaskProgress,
   TaskStatus,
@@ -15,6 +16,7 @@ import type {
 
 interface AppState {
   health: HealthResponse | null;
+  graphStats: GraphStats | null;
   projects: ProjectMeta[];
   currentProjectId: string;
   messages: ChatMessage[];
@@ -30,6 +32,7 @@ interface AppState {
 
 const initialState: AppState = {
   health: null,
+  graphStats: null,
   projects: [],
   currentProjectId: "default",
   messages: [],
@@ -47,6 +50,7 @@ const initialState: AppState = {
 
 type Action =
   | { type: "SET_HEALTH"; payload: HealthResponse }
+  | { type: "SET_GRAPH_STATS"; payload: GraphStats }
   | { type: "SET_PROJECTS"; payload: ProjectMeta[] }
   | { type: "ADD_PROJECT"; payload: ProjectMeta }
   | { type: "SET_PROJECT"; payload: string }
@@ -91,9 +95,10 @@ function applyTaskEvent(tasks: TaskProgress[], ev: WorkflowEvent): TaskProgress[
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "SET_HEALTH":    return { ...state, health: action.payload };
+    case "SET_GRAPH_STATS": return { ...state, graphStats: action.payload };
     case "SET_PROJECTS":  return { ...state, projects: action.payload };
     case "ADD_PROJECT":   return { ...state, projects: [...state.projects, action.payload] };
-    case "SET_PROJECT":   return { ...state, currentProjectId: action.payload, messages: [], runs: [], stageState: {}, tasks: [] };
+    case "SET_PROJECT":  return { ...state, currentProjectId: action.payload, graphStats: null, traceNodeId: null, messages: [], runs: [], stageState: {}, tasks: [] };
     case "RESTORE_CONVERSATION": {
       const byId = new Map<string, ChatMessage>();
       for (const message of [...action.payload, ...state.messages]) {
