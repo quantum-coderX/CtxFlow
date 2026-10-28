@@ -25,6 +25,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from ctxflow import CtxFlow
+from researchos.agents.retriever import _external_search_mode
 from researchos.agents.router import QueryIntent, classify_intent
 from researchos.guardrails import (
     ALLOWED_TOOLS,
@@ -34,10 +35,20 @@ from researchos.guardrails import (
     guard_query,
     wrap_untrusted,
 )
+from researchos.orchestration.research_tasks import (
+    ExecutionResult,
+    ResearchLimits,
+    ResearchPlan,
+    ResearchTaskExecutor,
+    SourceRecord,
+    plan_query,
+)
 from researchos.orchestration.state import ResearchState, make_event
 from researchos.pipeline import make_router, redact_secrets
 from researchos.skills.literature_search import LiteratureSearchSkill
 from researchos.skills.paper_reader import PaperReaderSkill
+from researchos.skills.source_fetch import SourceFetchSkill
+from researchos.skills.web_search import WebSearchSkill
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +101,16 @@ class ResearchWorkflow:
         max_wall_s: float = 90.0,
         max_tool_calls: int = 12,
         max_repairs: int = 1,
+        web_search: Optional[WebSearchSkill] = None,
+        source_fetch: Optional[SourceFetchSkill] = None,
+        limits: Optional[ResearchLimits] = None,
     ) -> None:
         self.ctxflow = ctxflow
         self.literature_search = literature_search
         self.paper_reader = paper_reader
+        self.web_search = web_search
+        self.source_fetch = source_fetch
+        self.limits = limits or ResearchLimits.from_env()
         self.llm = llm
         self.persist = persist
         self.max_wall_s = max_wall_s
@@ -110,6 +127,9 @@ class ResearchWorkflow:
         self._reader: Any = None
         self._synthesizer: Any = None
         self._critic: Any = None
+        self._executor: Optional[ResearchTaskExecutor] = None
+        self._plan: Optional[ResearchPlan] = None
+        self._sources: List[SourceRecord] = []
 
     # -- public API ------------------------------------------------------
     def run(
@@ -175,6 +195,9 @@ class ResearchWorkflow:
         self._reader = None
         self._synthesizer = None
         self._critic = None
+        self._executor = None
+        self._plan = None
+        self._sources = []
 
     def _initial_state(
         self, query: str, run_id: str, project_id: str, token_budget: int
@@ -185,6 +208,11 @@ class ResearchWorkflow:
             "query": query,
             "token_budget": max(1, int(token_budget)),
             "plan": list(STAGES),
+            "research_plan": {},
+            "tasks": [],
+            "sources": [],
+            "citations": [],
+            "fresh_sources": False,
             "allowed_tools": sorted(ALLOWED_TOOLS),
             "alerts": [],
             "errors": [],
@@ -227,6 +255,26 @@ class ResearchWorkflow:
                 self._on_event(event)
             except Exception:  # noqa: BLE001 — a listener must not fail the run
                 logger.exception("Event callback failed")
+
+    def _publish(self, event: Dict[str, Any]) -> None:
+        """Forward a live event to the listener without recording it."""
+        if self._on_event is None:
+            return
+        try:
+            self._on_event(redact_secrets(event))
+        except Exception:  # noqa: BLE001 — a listener must not fail the run
+            logger.exception("Event callback failed")
+
+    def _executor_for_run(self) -> ResearchTaskExecutor:
+        if self._executor is None:
+            self._executor = ResearchTaskExecutor(
+                run_id=self._run_id,
+                literature_search=self.literature_search,
+                web_search=self.web_search,
+                source_fetch=self.source_fetch,
+                limits=self.limits,
+            )
+        return self._executor
 
     def _ensure_agents(self, state: ResearchState) -> None:
         if self._retriever is not None:
@@ -288,15 +336,37 @@ class ResearchWorkflow:
             QueryIntent.CLAIM_VERIFICATION,
         )
         state["need_external"] = need_external
+        state["fresh_sources"] = intent is QueryIntent.NEW_LITERATURE
         self._ensure_agents(state)
+
+        providers = (
+            ()
+            if _external_search_mode() == "off"
+            else self._executor_for_run().available_providers()
+        )
+        plan = plan_query(
+            state["query"],
+            providers=providers,
+            llm=self.llm,
+            max_tasks=self.limits.max_subtasks,
+        )
+        self._plan = plan
+        state["research_plan"] = plan.to_dict()
+        state["tasks"] = [
+            {**task.to_dict(), "status": "pending", "provider_results": [], "result_count": 0}
+            for task in plan.subtasks
+        ]
         self._emit(
             "plan",
             "completed",
-            f"Intent {intent.value}; external retrieval "
+            f"Intent {intent.value}; {len(plan.subtasks)} research subtask(s) "
+            f"({plan.planner}); external retrieval "
             f"{'enabled' if need_external else 'only if memory is insufficient'}.",
             {
                 "intent": intent.value,
                 "plan": list(STAGES),
+                "research_plan": state["research_plan"],
+                "limits": self.limits.to_dict(),
                 "allowed_tools": state["allowed_tools"],
                 "engine": self.engine,
             },
@@ -314,28 +384,30 @@ class ResearchWorkflow:
             raise RuntimeError(tool_guard.reason)
 
         query = state["query"]
-        retrieve_result = self._retriever.run(query=query, max_results=8)
+        retrieve_result = self._retriever.run(
+            query=query, max_results=8, skip_external=True
+        )
         retrieve_data = retrieve_result.data or {}
         state["internal_results"] = retrieve_data.get("internal_results") or []
         knowledge_gap = bool(retrieve_data.get("knowledge_gap"))
         state["knowledge_gap"] = knowledge_gap
         external_search = retrieve_data.get("external_search")
 
-        if knowledge_gap:
-            search_guard = allow_tool("literature_search")
-            if not search_guard.allowed:
-                external_search = {
-                    "status": "error",
-                    "errors": {"guardrail": search_guard.reason},
-                }
-                retrieve_data["external_search"] = external_search
-
-        state["external_results"] = retrieve_data.get("external_results") or []
+        execution = self._run_research_tasks(state, knowledge_gap, external_search)
+        external_search = execution.external_search
+        self._events.extend(execution.events)
+        self._sources = list(execution.sources)
+        state["tasks"] = execution.tasks
+        state["sources"] = [source.to_public_dict() for source in execution.sources]
+        state["external_results"] = [
+            source.to_reader_dict()
+            for source in execution.sources
+            if self._has_evidence(source)
+        ]
         state["external_search"] = external_search
-        if isinstance(external_search, dict) and external_search.get("status") in {
-            "error",
-            "partial",
-        }:
+        if execution.errors:
+            state["errors"] = list(state.get("errors") or []) + execution.errors
+        if execution.degraded:
             state["degraded"] = True
         if not retrieve_result.success:
             state["degraded"] = True
@@ -344,17 +416,83 @@ class ResearchWorkflow:
             ]
         self._emit(
             "retrieve",
-            "completed" if retrieve_result.success else "degraded",
+            "completed"
+            if retrieve_result.success and not execution.degraded
+            else "degraded",
             "Memory search finished.",
             {
                 "knowledge_gap": knowledge_gap,
                 "internal_count": len(state["internal_results"]),
                 "external_count": len(state["external_results"]),
                 "external_search": external_search,
+                "tasks": [self._task_brief(task) for task in execution.tasks],
+                "sources": [
+                    {k: s[k] for k in ("source_id", "title", "url", "provider", "source_kind", "access_status")}
+                    for s in state["sources"]
+                ],
             },
         )
         self._maybe_stop(state)
         return state
+
+    @staticmethod
+    def _has_evidence(source: SourceRecord) -> bool:
+        """Only sources with real text enter the graph; snippets never do."""
+        if source.source_kind == "web":
+            return source.access_status == "full_text" and bool(source.excerpts)
+        return True
+
+    @staticmethod
+    def _task_brief(task: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "task_id": task.get("task_id"),
+            "query": task.get("query"),
+            "status": task.get("status"),
+            "result_count": task.get("result_count", 0),
+            "elapsed_ms": task.get("elapsed_ms", 0.0),
+            "providers": [
+                {k: r.get(k) for k in ("provider", "status", "result_count", "elapsed_ms")}
+                for r in task.get("provider_results") or []
+            ],
+        }
+
+    def _run_research_tasks(
+        self,
+        state: ResearchState,
+        knowledge_gap: bool,
+        retriever_external: Optional[Dict[str, Any]],
+    ) -> ExecutionResult:
+        """Fan planned subtasks out to bounded workers, or skip with a reason."""
+        plan = self._plan
+        assert plan is not None  # set by the plan stage
+        mode = _external_search_mode()
+        executor = self._executor_for_run()
+        fresh = bool(state.get("fresh_sources"))
+
+        reason = ""
+        if mode == "off":
+            reason = "external search disabled"
+        elif not (knowledge_gap or fresh):
+            reason = "project memory has sufficient evidence"
+        elif not executor.available_providers():
+            reason = "no research providers configured"
+        elif not allow_tool("literature_search").allowed:
+            reason = "search tool not allowed"
+
+        if reason:
+            result = ResearchTaskExecutor.skipped_result(plan, self._run_id, reason)
+            if retriever_external:
+                result.external_search = retriever_external
+            for event in result.events:
+                self._publish(event)
+            return result
+
+        return executor.execute(
+            plan,
+            cancel_event=self._cancel_event,
+            deadline=self._started_at + self.max_wall_s,
+            on_event=self._publish,
+        )
 
     # -- stage C: read ---------------------------------------------------
     def _stage_read(self, state: ResearchState) -> ResearchState:
@@ -378,6 +516,7 @@ class ResearchWorkflow:
                 )
                 read_data = read_result.data or {}
                 state["ingested_papers"] = read_data.get("ingested_papers") or []
+                self._attach_node_ids(state)
                 if not read_result.success:
                     # A paper that could not be read costs evidence but must
                     # not discard the graph answer; surface it as degradation.
@@ -399,6 +538,21 @@ class ResearchWorkflow:
         else:
             self._emit("read", "skipped", "No new papers to read; using project memory.")
         return state
+
+    @staticmethod
+    def _attach_node_ids(state: ResearchState) -> None:
+        """Record which graph nodes each ingested source produced."""
+        by_source = {
+            item.get("source_id"): item
+            for item in state.get("ingested_papers") or []
+            if item.get("source_id")
+        }
+        for source in state.get("sources") or []:
+            item = by_source.get(source.get("source_id"))
+            if item is not None:
+                source["node_ids"] = list(item.get("node_ids") or [])
+                source["source_node_id"] = item.get("source_node_id", "")
+                source["reused"] = bool(item.get("reused"))
 
     # -- stage D: memory -------------------------------------------------
     def _stage_memory(self, state: ResearchState) -> ResearchState:
@@ -489,6 +643,8 @@ class ResearchWorkflow:
         else:
             state["answer"] = synth_data.get("answer") or ""
             state["cited_nodes"] = packed_ids
+            if not packed_ids:
+                state["answer"] = self._insufficient_answer(state) or state["answer"]
             if not state.get("synthesis_ok", True):
                 state["degraded"] = True
                 state["errors"] = list(state.get("errors") or []) + [
@@ -531,6 +687,11 @@ class ResearchWorkflow:
             state["cited_nodes"], packed_ids, self.ctxflow
         )
         alerts = list(critic_data.get("alerts") or []) + extra_alerts
+        citations, source_alerts = self._resolve_citations(
+            state["cited_nodes"], self.ctxflow
+        )
+        alerts += source_alerts
+        state["citations"] = citations
         verdict = str(critic_data.get("verdict") or "INSUFFICIENT_EVIDENCE")
         if extra_alerts:
             if any(item.get("type") == "invalid_citation" for item in extra_alerts):
@@ -588,6 +749,34 @@ class ResearchWorkflow:
         return state
 
     # -- synthesis helpers ----------------------------------------------
+    @staticmethod
+    def _insufficient_answer(state: ResearchState) -> str:
+        """Explain an empty evidence pack when external sources failed."""
+        search = state.get("external_search") or {}
+        failed_sources = [
+            s for s in state.get("sources") or [] if s.get("access_status") == "failed"
+        ]
+        if search.get("status") not in {"error", "partial"} and not failed_sources:
+            return ""
+        reasons = [f"{k}: {v}" for k, v in (search.get("errors") or {}).items()]
+        reasons += [
+            f"{s.get('url')}: {s.get('metadata', {}).get('fetch_error', 'fetch failed')}"
+            for s in failed_sources
+        ]
+        detail = f" ({'; '.join(reasons)})" if reasons else ""
+        return (
+            "Insufficient evidence: project memory had nothing relevant and the "
+            f"external sources could not supply usable evidence{detail}."
+        )
+
+    @staticmethod
+    def _source_label(node: Any) -> str:
+        meta = node.metadata or {}
+        url = meta.get("source_url") or meta.get("url") or ""
+        access = meta.get("access_status") or ""
+        parts = [f"url={url}" if url else "", f"access={access}" if access else ""]
+        label = " ".join(p for p in parts if p)
+        return f" [source {label}]" if label else ""
     def _maybe_structured_answer(
         self, query: str, packed_ids: List[str]
     ) -> Optional[Dict[str, Any]]:
@@ -602,7 +791,8 @@ class ResearchWorkflow:
                 continue
             evidence_blocks.append(
                 wrap_untrusted(
-                    f"[Node:{node.id}] ({node.node_type}) {node.summary or node.content[:400]}",
+                    f"[Node:{node.id}] ({node.node_type}){self._source_label(node)} "
+                    f"{node.summary or node.content[:400]}",
                     source=f"node:{node.id}",
                 )
             )
@@ -656,6 +846,51 @@ class ResearchWorkflow:
             for item in follow_ups:
                 parts.append(f"- {item}")
         return "\n".join(part for part in parts if part)
+
+    @staticmethod
+    def _resolve_citations(
+        cited: List[str], ctxflow: CtxFlow
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Resolve cited nodes to their source URL and access status."""
+        citations: List[Dict[str, Any]] = []
+        alerts: List[Dict[str, Any]] = []
+        for node_id in cited:
+            node = ctxflow.graph.get_node(node_id)
+            if node is None:
+                continue
+            meta = node.metadata or {}
+            source_node = node if node.node_type == "paper" else None
+            source_node_id = meta.get("source_paper_node_id")
+            if source_node is None and source_node_id:
+                source_node = ctxflow.graph.get_node(source_node_id)
+            source_meta = (source_node or node).metadata or {}
+            url = meta.get("source_url") or source_meta.get("url") or ""
+            access = meta.get("access_status") or source_meta.get("access_status") or ""
+            status = node.status if isinstance(node.status, str) else node.status.value
+            citations.append(
+                {
+                    "node_id": node_id,
+                    "node_type": node.node_type,
+                    "status": status,
+                    "summary": (node.summary or node.content or "")[:200],
+                    "source_node_id": source_node.id if source_node is not None else "",
+                    "title": source_meta.get("title") or meta.get("source_paper") or "",
+                    "source_url": url,
+                    "provider": meta.get("provider") or source_meta.get("provider") or "",
+                    "source_kind": meta.get("source_kind") or source_meta.get("source_kind") or "",
+                    "access_status": access,
+                    "retrieved_at": meta.get("retrieved_at") or source_meta.get("retrieved_at") or "",
+                }
+            )
+            if (meta.get("source_kind") or source_meta.get("source_kind")) and not (url and access):
+                alerts.append(
+                    {
+                        "type": "missing_source",
+                        "node_id": node_id,
+                        "message": f"Cited node [{node_id}] lacks a source URL or access status.",
+                    }
+                )
+        return citations, alerts
 
     @staticmethod
     def _citation_guard(
@@ -746,6 +981,10 @@ class ResearchWorkflow:
             "engine": state.get("engine") or self.engine,
             "intent": state.get("intent"),
             "plan": state.get("plan"),
+            "research_plan": state.get("research_plan") or {},
+            "tasks": state.get("tasks") or [],
+            "sources": state.get("sources") or [],
+            "citations": state.get("citations") or [],
             "stage": events[-1]["stage"] if events else "plan",
             "answer": state.get("answer") or "",
             "verdict": state.get("verdict") or "",
@@ -795,6 +1034,9 @@ class ResearchGraph(ResearchWorkflow):
         max_tool_calls: int = 12,
         max_repairs: int = 1,
         checkpointer: Any = None,
+        web_search: Optional[WebSearchSkill] = None,
+        source_fetch: Optional[SourceFetchSkill] = None,
+        limits: Optional[ResearchLimits] = None,
     ) -> None:
         super().__init__(
             ctxflow,
@@ -805,6 +1047,9 @@ class ResearchGraph(ResearchWorkflow):
             max_wall_s=max_wall_s,
             max_tool_calls=max_tool_calls,
             max_repairs=max_repairs,
+            web_search=web_search,
+            source_fetch=source_fetch,
+            limits=limits,
         )
         self._checkpointer = checkpointer
         self._compiled: Any = None
@@ -981,6 +1226,9 @@ def build_orchestrator(
     max_tool_calls: int = 12,
     max_repairs: int = 1,
     checkpointer: Any = None,
+    web_search: Optional[WebSearchSkill] = None,
+    source_fetch: Optional[SourceFetchSkill] = None,
+    limits: Optional[ResearchLimits] = None,
 ) -> ResearchWorkflow:
     """Return the preferred orchestrator for this process.
 
@@ -996,6 +1244,9 @@ def build_orchestrator(
         "max_wall_s": max_wall_s,
         "max_tool_calls": max_tool_calls,
         "max_repairs": max_repairs,
+        "web_search": web_search,
+        "source_fetch": source_fetch,
+        "limits": limits,
     }
     if _orchestrator_preference() == "langgraph" and maybe_langgraph_available():
         return ResearchGraph(ctxflow, checkpointer=checkpointer, **kwargs)

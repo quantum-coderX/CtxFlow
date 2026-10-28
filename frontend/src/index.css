@@ -242,6 +242,38 @@ body {
 }
 .stage-elapsed { font-size: 11px; color: var(--text-4); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* Research subtasks and sources */
+.task-list {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 20px; background: var(--bg-1); border-bottom: 1px solid var(--border);
+  flex-shrink: 0; font-size: 11px;
+}
+.task-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.task-status {
+  min-width: 62px; text-align: center; padding: 1px 7px; border-radius: 100px;
+  background: var(--bg-2); border: 1px solid var(--border); color: var(--text-3);
+}
+.task-running .task-status   { color: var(--accent); border-color: var(--accent-dim); background: var(--accent-bg); }
+.task-completed .task-status { color: var(--green); border-color: hsl(152 40% 22%); }
+.task-partial .task-status   { color: var(--yellow); border-color: hsl(40 35% 22%); }
+.task-failed .task-status    { color: var(--red); border-color: hsl(4 35% 22%); }
+.task-skipped .task-status   { opacity: .7; }
+.task-query { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.task-providers { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.task-provider { padding: 1px 6px; border-radius: var(--radius-sm); background: var(--bg-2); color: var(--text-3); }
+.provider-error { color: var(--red); }
+.provider-partial { color: var(--yellow); }
+.provider-ok { color: var(--green); }
+
+.source-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.source-item { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.source-item a { color: var(--blue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-provider { color: var(--text-4); margin-left: auto; }
+.access-badge { padding: 1px 6px; border-radius: var(--radius-sm); font-size: 10px; background: var(--bg-2); border: 1px solid var(--border); color: var(--text-3); white-space: nowrap; }
+.access-full_text { color: var(--green); }
+.access-abstract_only { color: var(--yellow); }
+.access-failed { color: var(--red); }
+
 /* Messages */
 .messages {
   flex: 1; overflow-y: auto; padding: 28px 24px;

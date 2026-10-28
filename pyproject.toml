@@ -30,13 +30,14 @@ researchos = [
 ]
 orchestration = ["langgraph>=1.0"]
 mcp = ["mcp>=1.0"]
+web = ["ddgs>=9.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-asyncio>=0.23",
 ]
 all = [
-    "ctxflow[nlp,binary,llm,local-embeddings,researchos,orchestration,mcp,dev]",
+    "ctxflow[nlp,binary,llm,local-embeddings,researchos,orchestration,mcp,web,dev]",
     "spacy>=3.0",
     "msgpack>=1.0",
     "fastapi>=0.110",
@@ -46,6 +47,7 @@ all = [
     "sse-starlette>=2.0",
     "langgraph>=1.0",
     "mcp>=1.0",
+    "ddgs>=9.0",
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-asyncio>=0.23",

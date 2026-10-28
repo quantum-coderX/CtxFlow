@@ -6,6 +6,9 @@ import type {
   RunRecord,
   HealthResponse,
   StageState,
+  TaskProgress,
+  TaskStatus,
+  WorkflowEvent,
 } from "../types";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -18,6 +21,7 @@ interface AppState {
   runs: RunRecord[];
   busy: boolean;
   stageState: StageState;
+  tasks: TaskProgress[];
   activeRunId: string | null;
   elapsedMs: number;
   traceNodeId: string | null;
@@ -32,6 +36,7 @@ const initialState: AppState = {
   runs: [],
   busy: false,
   stageState: {},
+  tasks: [],
   activeRunId: null,
   elapsedMs: 0,
   traceNodeId: null,
@@ -50,18 +55,44 @@ type Action =
   | { type: "SET_BUSY"; payload: boolean }
   | { type: "SET_STAGE"; stage: string; status: string }
   | { type: "RESET_STAGES" }
+  | { type: "SET_TASKS"; payload: TaskProgress[] }
+  | { type: "TASK_EVENT"; payload: WorkflowEvent }
+  | { type: "CLOSE_TASKS" }
   | { type: "SET_ACTIVE_RUN"; payload: string | null }
   | { type: "SET_ELAPSED"; payload: number }
   | { type: "SET_RUNS"; payload: RunRecord[] }
   | { type: "SET_TRACE_NODE"; payload: string | null }
   | { type: "SET_SIDEBAR_TAB"; payload: "library" | "history" };
 
+function applyTaskEvent(tasks: TaskProgress[], ev: WorkflowEvent): TaskProgress[] {
+  if (!ev.task_id) return tasks;
+  const data = (ev.data ?? {}) as Record<string, unknown>;
+  return tasks.map((task) => {
+    if (task.task_id !== ev.task_id) return task;
+    if (ev.kind === "task_started") return { ...task, status: "running" as TaskStatus };
+    if (ev.kind === "task_skipped") {
+      const reason = typeof data.reason === "string" ? data.reason : ev.message;
+      if (!ev.provider) return { ...task, status: "skipped" as TaskStatus, reason };
+      return task;
+    }
+    if (!ev.provider) return task;
+    const progress = {
+      provider: ev.provider,
+      status: ev.status,
+      result_count: typeof data.result_count === "number" ? data.result_count : undefined,
+      elapsed_ms: typeof data.elapsed_ms === "number" ? data.elapsed_ms : undefined,
+      error: ev.kind === "task_failed" ? ev.message : undefined,
+    };
+    return { ...task, providers: [...task.providers, progress] };
+  });
+}
+
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "SET_HEALTH":    return { ...state, health: action.payload };
     case "SET_PROJECTS":  return { ...state, projects: action.payload };
     case "ADD_PROJECT":   return { ...state, projects: [...state.projects, action.payload] };
-    case "SET_PROJECT":   return { ...state, currentProjectId: action.payload, messages: [], runs: [], stageState: {} };
+    case "SET_PROJECT":   return { ...state, currentProjectId: action.payload, messages: [], runs: [], stageState: {}, tasks: [] };
     case "ADD_MESSAGE":   return { ...state, messages: [...state.messages, action.payload] };
     case "UPDATE_MESSAGE":
       return {
@@ -73,7 +104,17 @@ function reducer(state: AppState, action: Action): AppState {
     case "SET_BUSY":      return { ...state, busy: action.payload };
     case "SET_STAGE":
       return { ...state, stageState: { ...state.stageState, [action.stage]: action.status as StageState[string] } };
-    case "RESET_STAGES":  return { ...state, stageState: {} };
+    case "RESET_STAGES":  return { ...state, stageState: {}, tasks: [] };
+    case "SET_TASKS":     return { ...state, tasks: action.payload };
+    case "TASK_EVENT":    return { ...state, tasks: applyTaskEvent(state.tasks, action.payload) };
+    case "CLOSE_TASKS":
+      // A dropped connection must not leave tasks spinning forever.
+      return {
+        ...state,
+        tasks: state.tasks.map((t) =>
+          t.status === "running" || t.status === "pending" ? { ...t, status: "failed" as TaskStatus } : t
+        ),
+      };
     case "SET_ACTIVE_RUN": return { ...state, activeRunId: action.payload };
     case "SET_ELAPSED":   return { ...state, elapsedMs: action.payload };
     case "SET_RUNS":      return { ...state, runs: action.payload };

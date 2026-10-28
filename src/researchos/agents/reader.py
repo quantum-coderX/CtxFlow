@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 from ctxflow import CtxFlow
 from researchos.agents.base import AgentResult, BaseAgent
 from researchos.skills.paper_reader import PaperReaderSkill
+from researchos.skills.source_fetch import canonical_url
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +95,16 @@ class ReaderAgent(BaseAgent):
 
         for paper in papers_data:
             try:
-                node_ids = self._ingest_paper(paper, query)
+                node_ids, reused = self._ingest_paper_detail(paper, query)
                 ingested_nodes.append({
                     "title": paper.get("title", ""),
                     "node_ids": node_ids,
                     "source": paper.get("source", ""),
+                    "source_id": paper.get("source_id", ""),
+                    "source_node_id": node_ids[0] if node_ids else "",
+                    "access_status": paper.get("access_status", ""),
+                    "url": paper.get("url", ""),
+                    "reused": reused,
                 })
             except Exception as exc:
                 logger.warning(
@@ -112,7 +118,7 @@ class ReaderAgent(BaseAgent):
             data={
                 "ingested_papers": ingested_nodes,
                 "total_nodes_created": sum(
-                    len(p["node_ids"]) for p in ingested_nodes
+                    len(p["node_ids"]) for p in ingested_nodes if not p["reused"]
                 ),
             },
             metadata={
@@ -124,10 +130,17 @@ class ReaderAgent(BaseAgent):
     def _ingest_paper(
         self, paper: Dict[str, Any], query: str
     ) -> List[str]:
+        """Ingest a single paper and return its node IDs."""
+        return self._ingest_paper_detail(paper, query)[0]
+
+    def _ingest_paper_detail(
+        self, paper: Dict[str, Any], query: str
+    ) -> tuple[List[str], bool]:
         """Ingest a single paper's data into the knowledge graph.
 
         Creates a paper reference node and individual claim nodes
-        linked to it.
+        linked to it. Returns ``(node_ids, reused)``; ``reused`` is true when
+        the source already existed and nothing was created.
         """
         title = paper.get("title", "Unknown Paper")
         abstract = paper.get("abstract", "")
@@ -169,10 +182,23 @@ class ReaderAgent(BaseAgent):
         if doi:
             paper_content += f"\nDOI: {doi}"
 
-        existing = self._find_duplicate(title, arxiv_id, doi)
+        existing = self._find_duplicate(
+            title,
+            arxiv_id,
+            doi,
+            str(paper.get("source_id") or ""),
+            str(paper.get("url") or ""),
+            title_match=paper.get("source_kind") != "web",
+        )
         if existing is not None:
-            return [existing]
+            return [existing], True
 
+        provenance = {
+            "provider": paper.get("source", ""),
+            "source_kind": paper.get("source_kind") or "academic",
+            "retrieved_at": paper.get("retrieved_at", ""),
+            "source_id": paper.get("source_id", ""),
+        }
         paper_metadata = {
             "title": title,
             "authors": authors,
@@ -180,6 +206,8 @@ class ReaderAgent(BaseAgent):
             "doi": doi,
             "arxiv_id": arxiv_id,
             "url": paper.get("url", ""),
+            "source_url": paper.get("url", ""),
+            **provenance,
         }
 
         paper_tags = set()
@@ -188,6 +216,21 @@ class ReaderAgent(BaseAgent):
             cleaned = word.strip(".,;:!?()[]{}\"'")
             if len(cleaned) > 3:
                 paper_tags.add(cleaned)
+
+        # 2. Pick claims: PDF, pre-extracted source excerpts, full content, or abstract.
+        extraction_default = "pdf_reader" if extracted_claims else ""
+        if not extracted_claims and paper.get("claims"):
+            extracted_claims = [dict(c) for c in paper["claims"] if isinstance(c, dict)]
+        if not extracted_claims:
+            source_text = paper.get("content") or abstract
+            if source_text:
+                extracted_claims = self._extract_abstract_claims(source_text)
+        access_status = str(
+            paper.get("access_status")
+            or ("full_text" if pdf_path or paper.get("content") else "")
+            or ("abstract_only" if abstract else "unavailable")
+        )
+        paper_metadata["access_status"] = access_status
 
         paper_node_id = self._ctx.ingest(
             content=paper_content,
@@ -199,12 +242,6 @@ class ReaderAgent(BaseAgent):
 
         node_ids = [paper_node_id]
 
-        # 2. Ingest claims from the PDF, full content, or abstract.
-        if not extracted_claims:
-            source_text = paper.get("content") or abstract
-            if source_text:
-                extracted_claims = self._extract_abstract_claims(source_text)
-
         for claim in extracted_claims:
             claim_text = claim.get("text", "").strip()
             if not claim_text:
@@ -212,35 +249,58 @@ class ReaderAgent(BaseAgent):
             claim_tags = set(claim.get("tags", []))
             claim_tags.update(paper_tags)
 
+            claim_metadata: Dict[str, Any] = {
+                "confidence": claim.get("confidence", 0.5),
+                "source_paper": title,
+                "source_doi": doi,
+                "source_paper_node_id": paper_node_id,
+                "source_url": paper.get("url", ""),
+                "access_status": access_status,
+                "extraction_method": claim.get("extraction_method") or extraction_default,
+                **provenance,
+            }
+            for key in ("section", "page", "span_start", "span_end", "evidence_kind"):
+                if claim.get(key) is not None:
+                    claim_metadata[key] = claim[key]
+
             claim_node_id = self._ctx.ingest(
                 content=claim_text[:500],
                 node_type=claim.get("type", "claim"),
                 source_id=paper_node_id,
                 relation_type="extracted_from",
                 tags=claim_tags,
-                metadata={
-                    "confidence": claim.get("confidence", 0.5),
-                    "source_paper": title,
-                    "source_doi": doi,
-                },
+                metadata=claim_metadata,
                 check_contradictions=True,
             )
             node_ids.append(claim_node_id)
 
-        return node_ids
+        return node_ids, False
 
-    def _find_duplicate(self, title: str, arxiv_id: str, doi: str) -> Optional[str]:
+    def _find_duplicate(
+        self,
+        title: str,
+        arxiv_id: str,
+        doi: str,
+        source_id: str = "",
+        url: str = "",
+        title_match: bool = True,
+    ) -> Optional[str]:
         title_key = " ".join(title.lower().split())
+        url_key = canonical_url(url) if url else ""
         for node in self._ctx.graph.all_nodes():
             if node.node_type != "paper":
                 continue
             meta = node.metadata or {}
+            if source_id and str(meta.get("source_id") or "") == source_id:
+                return node.id
             if arxiv_id and str(meta.get("arxiv_id") or "") == arxiv_id:
                 return node.id
             if doi and str(meta.get("doi") or "") == doi:
                 return node.id
+            if url_key and canonical_url(str(meta.get("url") or "")) == url_key:
+                return node.id
             existing_title = " ".join(str(meta.get("title") or "").lower().split())
-            if title_key and existing_title == title_key:
+            if title_key and title_match and existing_title == title_key:
                 return node.id
         return None
 
@@ -252,7 +312,12 @@ class ReaderAgent(BaseAgent):
             try:
                 from ctxflow.llm_extractor import LLMExtractor
                 extractor = LLMExtractor(llm=self._llm)
-                return extractor.extract_claims(abstract)
+                claims = extractor.extract_claims(abstract)
+                for claim in claims:
+                    if isinstance(claim, dict):
+                        claim.setdefault("extraction_method", "llm_abstract")
+                        claim.setdefault("evidence_kind", "abstract")
+                return claims
             except Exception as exc:
                 logger.warning(
                     "LLM claim extraction failed (%s), using heuristic", exc
@@ -277,6 +342,8 @@ class ReaderAgent(BaseAgent):
                 "text": sentence[:500],
                 "confidence": 0.5,
                 "tags": tags,
+                "extraction_method": "heuristic_sentence",
+                "evidence_kind": "abstract",
             })
 
         return claims

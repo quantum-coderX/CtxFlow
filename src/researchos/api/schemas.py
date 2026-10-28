@@ -412,6 +412,10 @@ class RunResponse(BaseModel):
     stage: str = ""
     intent: Optional[str] = None
     plan: List[str] = Field(default_factory=list)
+    research_plan: Dict[str, Any] = Field(default_factory=dict)
+    tasks: List[Dict[str, Any]] = Field(default_factory=list)
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
     started_at: float = 0.0
     ended_at: Optional[float] = None
     answer: str = ""
