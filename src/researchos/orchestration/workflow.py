@@ -529,6 +529,7 @@ class ResearchWorkflow:
                             "external_results": state["external_results"],
                             "knowledge_gap": state.get("knowledge_gap"),
                             "external_search": state.get("external_search"),
+                            "fulltext_deadline": self._started_at + self.max_wall_s,
                         }
                     },
                     previous_results=[],

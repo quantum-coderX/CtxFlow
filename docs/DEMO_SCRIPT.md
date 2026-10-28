@@ -47,6 +47,7 @@ Open **http://localhost:8000** in your browser.
 | `RESEARCHOS_MCP_TIMEOUT` | `60` | Seconds per MCP tool call |
 | `RESEARCHOS_MCP_STARTUP_TIMEOUT` | `180` | First `uvx` start may download the server |
 | `RESEARCHOS_LLM_CLAIM_EXTRACTION` | `1` | Set `0` to keep abstract claim extraction deterministic on token-capped tiers |
+| `RESEARCHOS_FULLTEXT` | `off` | Set `top3` to fetch bounded arXiv PDFs for the first three search results; extracts only Introduction, Results, and Conclusion |
 | `RESEARCHOS_DATA_DIR` | `.researchos_data` | Project graphs + run records |
 
 For a fully offline, deterministic demo set

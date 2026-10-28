@@ -10,6 +10,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import tempfile
+import time
+import urllib.request
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from ctxflow import CtxFlow
@@ -20,6 +25,11 @@ from researchos.skills.source_fetch import canonical_url
 logger = logging.getLogger(__name__)
 
 _FALSEY = frozenset({"0", "false", "no", "off"})
+_ARXIV_ID = re.compile(r"(?:\d{4}\.\d{4,5}|[A-Za-z.-]+/\d{7})(?:v\d+)?")
+_FULLTEXT_MAX_PAPERS = 3
+_FULLTEXT_PHASE_BUDGET_S = 8.0
+_FULLTEXT_DOWNLOAD_TIMEOUT_S = 5.0
+_FULLTEXT_MAX_PDF_BYTES = 12 * 1024 * 1024
 
 
 def llm_claim_extraction_enabled() -> bool:
@@ -33,6 +43,11 @@ def llm_claim_extraction_enabled() -> bool:
 
     raw = str(os.environ.get("RESEARCHOS_LLM_CLAIM_EXTRACTION", "")).strip().lower()
     return raw not in _FALSEY
+
+
+def _fulltext_top3_enabled() -> bool:
+    """Enable bounded full-text reading only for the explicit ``top3`` value."""
+    return str(os.environ.get("RESEARCHOS_FULLTEXT", "off")).strip().lower() == "top3"
 
 
 class ReaderAgent(BaseAgent):
@@ -91,6 +106,12 @@ class ReaderAgent(BaseAgent):
         if not papers_data and isinstance(context.get("previous_output"), dict):
             papers_data = context["previous_output"].get("external_results", [])
 
+        if _fulltext_top3_enabled() and papers_data:
+            papers_data = self._enrich_top_papers_with_fulltext(
+                papers_data,
+                context.get("fulltext_deadline"),
+            )
+
         ingested_nodes: List[Dict[str, Any]] = []
 
         for paper in papers_data:
@@ -126,6 +147,74 @@ class ReaderAgent(BaseAgent):
                 "papers_ingested": len(ingested_nodes),
             },
         )
+
+    def _enrich_top_papers_with_fulltext(
+        self,
+        papers: List[Dict[str, Any]],
+        deadline: Optional[float],
+    ) -> List[Dict[str, Any]]:
+        """Enrich at most three arXiv results before claim ingestion."""
+        stop_at = time.monotonic() + _FULLTEXT_PHASE_BUDGET_S
+        if isinstance(deadline, (int, float)):
+            stop_at = min(stop_at, float(deadline))
+
+        enriched = [dict(paper) for paper in papers]
+        for paper in enriched[:_FULLTEXT_MAX_PAPERS]:
+            if paper.get("content") or paper.get("claims"):
+                continue
+            arxiv_id = str(paper.get("arxiv_id") or "").strip()
+            if not _ARXIV_ID.fullmatch(arxiv_id):
+                continue
+            remaining = stop_at - time.monotonic()
+            if remaining <= 0:
+                logger.info("Skipping arXiv full-text reads: wall-clock budget exhausted")
+                break
+
+            try:
+                pdf_bytes = self._download_arxiv_pdf(arxiv_id, remaining)
+                with tempfile.TemporaryDirectory(prefix="researchos-arxiv-") as temp_dir:
+                    pdf_path = Path(temp_dir) / "paper.pdf"
+                    pdf_path.write_bytes(pdf_bytes)
+                    excerpts = self._paper_reader.read_selected_sections(str(pdf_path))
+                if excerpts.get("content") and excerpts.get("claims"):
+                    paper.update(excerpts)
+                    paper["access_status"] = "full_text"
+            except Exception as exc:
+                logger.warning(
+                    "Full-text read failed for arXiv paper %s: %s",
+                    arxiv_id,
+                    exc,
+                )
+        return enriched
+
+    @staticmethod
+    def _download_arxiv_pdf(arxiv_id: str, remaining_s: float) -> bytes:
+        """Fetch a size-limited PDF from arXiv within the remaining time."""
+        from urllib.parse import quote
+
+        url = f"https://arxiv.org/pdf/{quote(arxiv_id, safe='/.')}"
+        timeout = min(_FULLTEXT_DOWNLOAD_TIMEOUT_S, remaining_s)
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "ResearchOS/1.0 (bounded paper reader)"},
+        )
+        chunks: List[bytes] = []
+        total_bytes = 0
+        started = time.monotonic()
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            while True:
+                if time.monotonic() - started >= remaining_s:
+                    raise TimeoutError("arXiv PDF download exceeded the wall-clock budget")
+                chunk = response.read(64 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > _FULLTEXT_MAX_PDF_BYTES:
+                    raise ValueError("arXiv PDF exceeds the 12 MiB size limit")
+                chunks.append(chunk)
+        if not chunks:
+            raise ValueError("arXiv returned an empty PDF")
+        return b"".join(chunks)
 
     def _ingest_paper(
         self, paper: Dict[str, Any], query: str
