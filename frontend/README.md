@@ -30,3 +30,11 @@ If you are developing a production application, we recommend enabling type-aware
 ```
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+
+## ResearchOS workspace
+
+The workspace opens on the project knowledge graph. Use the Graph and Research chat tabs
+to switch views. The graph supports search, node-type filtering, pan/zoom, and node
+selection; selecting a node opens its evidence trace. Graph statistics are polled every
+2.5 seconds, and the full graph is reloaded when the project graph revision changes (or
+when manually refreshed).

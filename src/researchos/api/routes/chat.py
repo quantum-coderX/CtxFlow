@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from researchos.api.graph_revision import bump_graph_revision
 from researchos.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -85,6 +86,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 "conversation_history": conversation_history,
             },
         )
+        bump_graph_revision(request.project_id)
+        if workspace is not None:
+            workspace.save_graph(request.project_id)
 
         data = result.data or {}
         pipeline_result = data.get("result", {}) or {}

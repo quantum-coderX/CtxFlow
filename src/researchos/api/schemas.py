@@ -137,6 +137,7 @@ class GraphStatsResponse(BaseModel):
 
     total_nodes: int = 0
     total_edges: int = 0
+    revision: int = 0
     status_distribution: Dict[str, int] = Field(default_factory=dict)
     type_distribution: Dict[str, int] = Field(default_factory=dict)
 

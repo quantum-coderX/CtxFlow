@@ -25,6 +25,7 @@ from researchos.api.schemas import (
     TraceResponse,
     TraceStepResponse,
 )
+from researchos.api.graph_revision import bump_graph_revision, get_graph_revision
 from researchos.demo import seed_demo_corpus
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ def _resolve_ctxflow(project_id: str = "default") -> Any:
 
 
 def _save_graph(project_id: str = "default") -> None:
+    bump_graph_revision(project_id)
     ws = _app_state.get("workspace")
     if ws is not None:
         ws.save_graph(project_id)
@@ -304,6 +306,7 @@ async def graph_stats(project_id: str = "default") -> GraphStatsResponse:
     return GraphStatsResponse(
         total_nodes=graph.node_count,
         total_edges=graph.edge_count,
+        revision=get_graph_revision(project_id),
         status_distribution=status_dist,
         type_distribution=type_dist,
     )

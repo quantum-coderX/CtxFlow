@@ -7,6 +7,7 @@ from typing import Any, List
 
 from fastapi import APIRouter, HTTPException
 
+from researchos.api.graph_revision import bump_graph_revision
 from researchos.api.schemas import (
     NoteCreateRequest,
     NoteListResponse,
@@ -39,12 +40,20 @@ def _to_response(node: Any) -> NoteResponse:
     )
 
 
-@router.post("/notes", response_model=NoteResponse)
-async def create_note(request: NoteCreateRequest) -> NoteResponse:
-    """Store a researcher note as a CtxFlow node."""
+def _resolve_ctxflow(project_id: str) -> Any:
+    workspace = _app_state.get("workspace")
+    if workspace is not None:
+        return workspace.get_graph(project_id)
     ctxflow = _app_state.get("ctxflow")
     if ctxflow is None:
         raise HTTPException(503, detail="CtxFlow not initialized")
+    return ctxflow
+
+
+@router.post("/notes", response_model=NoteResponse)
+async def create_note(request: NoteCreateRequest) -> NoteResponse:
+    """Store a researcher note as a CtxFlow node."""
+    ctxflow = _resolve_ctxflow(request.project_id)
 
     title = request.title.strip()
     content = request.content.strip()
@@ -66,6 +75,10 @@ async def create_note(request: NoteCreateRequest) -> NoteResponse:
             check_contradictions=False,
         )
         node = ctxflow.graph.get_node(node_id)
+        bump_graph_revision(request.project_id)
+        workspace = _app_state.get("workspace")
+        if workspace is not None:
+            workspace.save_graph(request.project_id)
         return _to_response(node)
     except Exception as exc:
         logger.error("Note creation failed: %s", exc, exc_info=True)
@@ -75,9 +88,7 @@ async def create_note(request: NoteCreateRequest) -> NoteResponse:
 @router.get("/notes", response_model=NoteListResponse)
 async def list_notes(project_id: str = "default") -> NoteListResponse:
     """List notes for a project (newest first)."""
-    ctxflow = _app_state.get("ctxflow")
-    if ctxflow is None:
-        raise HTTPException(503, detail="CtxFlow not initialized")
+    ctxflow = _resolve_ctxflow(project_id)
 
     notes: List[NoteResponse] = []
     for node in ctxflow.graph.all_nodes():

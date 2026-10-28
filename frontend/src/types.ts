@@ -161,6 +161,27 @@ export interface GraphNode {
   timestamp?: number;
 }
 
+export interface GraphEdge {
+  source_id: string;
+  target_id: string;
+  relation_type: string;
+  weight: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface GraphStats {
+  total_nodes: number;
+  total_edges: number;
+  revision: number;
+  status_distribution: Record<string, number>;
+  type_distribution: Record<string, number>;
+}
+
 export interface Contradiction {
   node_id: string;
   content: string;
