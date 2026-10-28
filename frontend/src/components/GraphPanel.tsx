@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { api } from "../api";
 import type { GraphData, GraphNode } from "../types";
-import { useApp, useAppState } from "../store/AppContext";
+import { useApp } from "../store/AppContext";
 
 interface Point {
   x: number;
