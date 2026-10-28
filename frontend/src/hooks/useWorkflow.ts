@@ -1,6 +1,6 @@
 import { useCallback, useRef } from "react";
 import { useApp } from "../store/AppContext";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, ResearchPlan, TaskProgress, WorkflowEvent } from "../types";
 import { WORKFLOW_STAGES } from "../types";
 import { api } from "../api";
 
@@ -86,14 +86,54 @@ export function useWorkflow() {
         });
       }
 
+      // The validated plan arrives with the completed plan stage.
+      source.addEventListener("plan", (e: MessageEvent) => {
+        const d = safeJson(e.data);
+        const plan = (d.data as { research_plan?: ResearchPlan } | undefined)?.research_plan;
+        if (plan?.subtasks?.length) {
+          dispatch({
+            type: "SET_TASKS",
+            payload: plan.subtasks.map((t) => ({
+              task_id: t.task_id,
+              query: t.query,
+              purpose: t.purpose,
+              status: "pending" as const,
+              providers: [],
+            })),
+          });
+        }
+      });
+
+      // Task-level progress inside the retrieve stage.
+      source.addEventListener("task", (e: MessageEvent) => {
+        dispatch({ type: "TASK_EVENT", payload: safeJson(e.data) as unknown as WorkflowEvent });
+      });
+
       const finish = (data: Record<string, unknown> | null) => {
         source.close();
         sourceRef.current = null;
         stopTimer();
 
+        if (data) {
+          const finalTasks = data.tasks as TaskProgress[] | undefined;
+          if (Array.isArray(finalTasks) && finalTasks.length) {
+            dispatch({
+              type: "SET_TASKS",
+              payload: finalTasks.map((t) => ({
+                ...t,
+                providers: (t as unknown as { provider_results?: TaskProgress["providers"] }).provider_results ?? t.providers ?? [],
+              })),
+            });
+          } else {
+            dispatch({ type: "CLOSE_TASKS" });
+          }
+        } else {
+          dispatch({ type: "CLOSE_TASKS" });
+        }
+
         // Mark all pending stages done
         for (const s of WORKFLOW_STAGES) {
-          dispatch({ type: "SET_STAGE", stage: s, status: "done" });
+          dispatch({ type: "SET_STAGE", stage: s, status: data ? "done" : "failed" });
         }
 
         const answer = (data?.answer as string) || "(No answer — graph may be empty)";
@@ -109,6 +149,8 @@ export function useWorkflow() {
             verdict: (data?.verdict as string) ?? undefined,
             external_search: data?.external_search as ChatMessage["external_search"],
             context_usage: data?.context_usage as ChatMessage["context_usage"],
+            sources: (data?.sources as ChatMessage["sources"]) ?? [],
+            citations: (data?.citations as ChatMessage["citations"]) ?? [],
           },
         });
 

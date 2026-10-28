@@ -87,7 +87,8 @@ class RetrieverAgent(BaseAgent):
         """
         query: str = kwargs.get("query", "")
         max_results: int = kwargs.get("max_results", 10)
-
+        # The workflow runs external search itself (planned, parallel workers).
+        skip_external: bool = bool(kwargs.get("skip_external", False))
         if not query:
             return AgentResult(
                 agent_name=self.name,
@@ -128,7 +129,7 @@ class RetrieverAgent(BaseAgent):
         }
 
         # 3. If gap detected, search externally
-        if has_gap and self._search_skill and search_enabled:
+        if has_gap and self._search_skill and search_enabled and not skip_external:
             logger.info(
                 "Knowledge gap detected for '%s', searching externally",
                 query[:80],

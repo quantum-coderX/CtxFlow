@@ -38,7 +38,11 @@ Open **http://localhost:8000** in your browser.
 | Variable | Default | Meaning |
 |---|---|---|
 | `RESEARCHOS_ORCHESTRATOR` | `langgraph` | `langgraph` or `sequential` (plain Python fallback) |
-| `RESEARCHOS_EXTERNAL_SEARCH` | `auto` | `auto` (only on a knowledge gap), `force` (always), `off` (graph-only) |
+| `RESEARCHOS_EXTERNAL_SEARCH` | `auto` | `auto` (only on a knowledge gap), `force` (always), `off` (graph-only; also disables web search) |
+| `RESEARCHOS_WEB_SEARCH` | `off` | Opt in to general-web search + page fetching (`on`). Needs `pip install -e ".[web]"`; ignored when `RESEARCHOS_EXTERNAL_SEARCH=off` |
+| `RESEARCHOS_LLM_PLANNING` | `1` | Set `0` to skip the model when decomposing compound questions (deterministic splitter only) |
+| `RESEARCHOS_MAX_SUBTASKS` / `_MAX_WORKERS` / `_RESULTS_PER_PROVIDER` / `_MAX_FETCHED_PAGES` | `4` / `2` / `3` / `4` | Research fan-out bounds (subtasks capped at 4) |
+| `RESEARCHOS_FETCH_TIMEOUT_S` / `_MAX_PAGE_BYTES` / `_MAX_RESEARCH_S` | `8` / `1000000` / `60` | Per-page timeout, per-page size cap, research-phase wall budget |
 | `RESEARCHOS_MCP_ENABLED` | `1` | Set `0` to force the HTTP arXiv provider |
 | `RESEARCHOS_MCP_TIMEOUT` | `60` | Seconds per MCP tool call |
 | `RESEARCHOS_MCP_STARTUP_TIMEOUT` | `180` | First `uvx` start may download the server |
@@ -217,6 +221,57 @@ Expected seed response (fresh project):
   "relations_applied": 2
 }
 ```
+
+---
+
+## Parallel Research Demo (compound question)
+
+Implements `docs/MINIMAL_PARALLEL_RESEARCH_DEMO_PLAN.md`: the `plan` stage
+decomposes a compound question into 2-4 validated subtasks, the `retrieve`
+stage fans them out to at most two workers (arXiv MCP / academic providers and,
+when enabled, web search + bounded page fetch), and sources are ingested into
+the project's CtxFlow graph before synthesis.
+
+```powershell
+pip install -e ".[researchos,orchestration,mcp,web]"
+$env:RESEARCHOS_WEB_SEARCH="on"
+$env:RESEARCHOS_LLM_CLAIM_EXTRACTION="0"
+```
+
+1. Create/select a project and seed the demo corpus (or start empty).
+2. Ask: *How do graph-based memory systems improve long-horizon retrieval, and
+   what limitations remain compared with vector RAG?*
+   - The **subtask list** under the stage bar shows each subtask, its provider
+     outcomes and result counts; `task` SSE events carry
+     `task_started | task_completed | task_failed | task_skipped`.
+   - The answer lists **sources** with links and an access label
+     (`full text`, `abstract only`, `fetch failed`); citation chips resolve to
+     graph nodes and carry the source URL.
+3. Ask a focused follow-up (*Which limitations of graph-based memory systems
+   remain compared with vector RAG?*). Every task shows `skipped`: the project
+   graph already holds the evidence, so no provider is called.
+4. Break one provider (for example `RESEARCHOS_MCP_ENABLED=0` with no network,
+   or stop the web provider) and repeat with a new question: the run is
+   `degraded`, provider errors are listed, and citations come from the
+   remaining sources. If nothing usable is returned the answer says
+   `Insufficient evidence` instead of inventing support.
+
+Run-result additions (existing keys are unchanged): `research_plan`
+(`primary_question`, `subtasks`, `planner` = `model` | `deterministic_fallback`),
+`tasks`, `sources` (metadata + created node IDs, never page bodies) and
+`citations`. The legacy `plan` field is still the list of stage names.
+
+Offline acceptance tests (no network): `tests/test_research_tasks.py`,
+`tests/test_web_sources.py`, `tests/test_parallel_research_workflow.py`,
+`tests/test_research_stream_contract.py`. The live rehearsal above is
+environment-dependent and is not part of CI.
+
+Limits and non-goals: no process-restart resume (completed runs and the saved
+graph persist; the LangGraph checkpointer is in-memory), no `ctxflow.memory`
+store in this path, and page fetching respects `robots.txt`, refuses
+private/loopback hosts and never uses credentials. Web excerpts are
+sentence-overlap extractions stored verbatim with character spans; abstract
+claims are labelled `abstract_only`.
 
 ---
 

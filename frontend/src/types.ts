@@ -24,6 +24,10 @@ export interface RunRecord {
   validations: Record<string, unknown>[];
   context_usage: ContextUsage;
   external_search?: ExternalSearch;
+  research_plan?: ResearchPlan;
+  tasks?: TaskProgress[];
+  sources?: SourceInfo[];
+  citations?: Citation[];
   errors: string[];
   degraded: boolean;
   started_at: number;
@@ -54,12 +58,65 @@ export interface ExternalSearch {
 }
 
 export interface WorkflowEvent {
+  event?: string;
+  kind?: string;
+  task_id?: string;
+  provider?: string;
   run_id: string;
   stage: string;
   status: string;
   message: string;
   ts: number;
   data?: Record<string, unknown>;
+}
+
+export type TaskStatus =
+  | "pending" | "running" | "completed" | "partial" | "failed" | "skipped";
+
+export interface ProviderProgress {
+  provider: string;
+  status: string;
+  result_count?: number;
+  elapsed_ms?: number;
+  error?: string;
+}
+
+export interface TaskProgress {
+  task_id: string;
+  query: string;
+  purpose?: string;
+  status: TaskStatus;
+  providers: ProviderProgress[];
+  result_count?: number;
+  elapsed_ms?: number;
+  reason?: string;
+}
+
+export interface ResearchPlan {
+  primary_question: string;
+  planner: string;
+  subtasks: { task_id: string; query: string; purpose?: string; providers: string[] }[];
+}
+
+export type AccessStatus = "abstract_only" | "full_text" | "unavailable" | "failed";
+
+export interface SourceInfo {
+  source_id: string;
+  provider: string;
+  source_kind: "academic" | "web";
+  title: string;
+  url: string;
+  access_status: AccessStatus;
+  node_ids?: string[];
+  task_ids?: string[];
+}
+
+export interface Citation {
+  node_id: string;
+  title?: string;
+  source_url?: string;
+  access_status?: string;
+  provider?: string;
 }
 
 export interface HealthResponse {
@@ -124,6 +181,8 @@ export interface ChatMessage {
   verdict?: string;
   external_search?: ExternalSearch;
   context_usage?: ContextUsage;
+  sources?: SourceInfo[];
+  citations?: Citation[];
   timestamp: number;
 }
 

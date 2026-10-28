@@ -42,11 +42,78 @@ function StageBar() {
   );
 }
 
+// ─── Research subtasks ────────────────────────────────────────────────────────
+
+function TaskList() {
+  const state = useAppState();
+  if (state.tasks.length === 0) return null;
+
+  return (
+    <div className="task-list" role="list" aria-label="Research subtasks">
+      {state.tasks.map((task) => (
+        <div key={task.task_id} className={`task-row task-${task.status}`} role="listitem">
+          <span className="task-status">{task.status}</span>
+          <span className="task-query" title={task.purpose || task.query}>{task.query}</span>
+          <span className="task-providers">
+            {task.providers.map((p, i) => (
+              <span
+                key={`${p.provider}-${i}`}
+                className={`task-provider provider-${p.status}`}
+                title={p.error || `${p.provider}: ${p.status}`}
+              >
+                {p.provider}
+                {typeof p.result_count === "number" ? ` ${p.result_count}` : ""}
+              </span>
+            ))}
+            {task.status === "skipped" && task.reason && (
+              <span className="task-provider provider-skipped">{task.reason}</span>
+            )}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const ACCESS_LABELS: Record<string, string> = {
+  abstract_only: "abstract only",
+  full_text: "full text",
+  unavailable: "unavailable",
+  failed: "fetch failed",
+};
+
+function safeHref(url: string): string | undefined {
+  return /^https?:\/\//i.test(url) ? url : undefined;
+}
+
+function SourceList({ sources }: { sources: NonNullable<ChatMessage["sources"]> }) {
+  if (sources.length === 0) return null;
+  return (
+    <ul className="source-list" aria-label="Sources">
+      {sources.map((s) => (
+        <li key={s.source_id} className="source-item">
+          <span className={`access-badge access-${s.access_status}`}>
+            {ACCESS_LABELS[s.access_status] ?? s.access_status}
+          </span>
+          {safeHref(s.url) ? (
+            <a href={safeHref(s.url)} target="_blank" rel="noopener noreferrer">
+              {s.title || s.url}
+            </a>
+          ) : (
+            <span>{s.title || s.source_id}</span>
+          )}
+          <span className="source-provider">{s.provider}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 // ─── Individual message ───────────────────────────────────────────────────────
 
-function CitationChip({ nodeId, onTrace }: { nodeId: string; onTrace: (id: string) => void }) {
+function CitationChip({ nodeId, onTrace, hint }: { nodeId: string; onTrace: (id: string) => void; hint?: string }) {
   return (
-    <button className="citation-chip" onClick={() => onTrace(nodeId)} title={nodeId}>
+    <button className="citation-chip" onClick={() => onTrace(nodeId)} title={hint ? `${nodeId}\n${hint}` : nodeId}>
       <svg viewBox="0 0 16 16" fill="currentColor" style={{ width: 10, height: 10 }}>
         <path d="M4 4h4v1H5v6h6V8h1v4H4V4z" />
         <path d="M8 4h4v4h-1V5.7L7.4 9.3l-.7-.7L10.3 5H8V4z" />
@@ -126,11 +193,15 @@ function Message({ msg, onTrace }: { msg: ChatMessage; onTrace: (id: string) => 
         {/* Citation chips */}
         {msg.cited_nodes && msg.cited_nodes.length > 0 && (
           <div className="citation-row">
-            {msg.cited_nodes.slice(0, 8).map((nid) => (
-              <CitationChip key={nid} nodeId={nid} onTrace={onTrace} />
-            ))}
+            {msg.cited_nodes.slice(0, 8).map((nid) => {
+              const c = msg.citations?.find((item) => item.node_id === nid);
+              const hint = c ? [c.title, c.source_url, c.access_status].filter(Boolean).join(" · ") : undefined;
+              return <CitationChip key={nid} nodeId={nid} onTrace={onTrace} hint={hint} />;
+            })}
           </div>
         )}
+
+        {msg.sources && <SourceList sources={msg.sources} />}
 
         {/* Alerts */}
         {msg.alerts && msg.alerts.length > 0 && (
@@ -236,6 +307,7 @@ export function ChatPanel() {
   return (
     <section className="chat-panel">
       <StageBar />
+      <TaskList />
 
       <div className="messages" role="log" aria-live="polite" aria-label="Research conversation">
         {state.messages.length === 0 && (

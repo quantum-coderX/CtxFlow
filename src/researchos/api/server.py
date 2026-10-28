@@ -54,6 +54,7 @@ from researchos.api.schemas import (
     SkillListResponse,
 )
 from researchos.gateway import ModelGateway, create_model_gateway
+from researchos.orchestration.research_tasks import ResearchLimits
 from researchos.orchestration.workflow import build_orchestrator
 from researchos.persistence import ResearchWorkspace, new_run_id
 from researchos.pipeline import make_router, redact_secrets
@@ -62,6 +63,8 @@ from researchos.skills.literature_search import LiteratureSearchSkill
 from researchos.skills.paper_reader import PaperReaderSkill
 from researchos.skills.registry import SkillRegistry
 from researchos.skills.review_writer import ReviewWriterSkill
+from researchos.skills.source_fetch import SourceFetchSkill
+from researchos.skills.web_search import WebSearchSkill
 from researchos.memory.context import create_context_provider
 
 logger = logging.getLogger(__name__)
@@ -165,11 +168,20 @@ def create_app(
         state["arxiv_mcp"] = arxiv_mcp
 
         lit_search = LiteratureSearchSkill(arxiv_client=arxiv_mcp)
+        research_limits = ResearchLimits.from_env()
+        web_search = WebSearchSkill(max_results=research_limits.results_per_provider)
+        source_fetch = SourceFetchSkill(
+            timeout=research_limits.fetch_timeout_s,
+            max_bytes=research_limits.max_page_bytes,
+        )
         paper_reader = PaperReaderSkill(llm=llm)
         graph_query = GraphQuerySkill(ctxflow)
         review_writer = ReviewWriterSkill(ctxflow, llm=llm)
 
         state["literature_search"] = lit_search
+        state["web_search"] = web_search
+        state["source_fetch"] = source_fetch
+        state["research_limits"] = research_limits
         state["paper_reader"] = paper_reader
         state["graph_query"] = graph_query
         state["review_writer"] = review_writer
@@ -178,6 +190,41 @@ def create_app(
         if skill_registry is None:
             skill_registry = SkillRegistry()
 
+            skill_registry.register_function(
+                name="web_search",
+                fn=lambda query, max_results=None: web_search.search_with_outcome(
+                    query, max_results
+                ).to_dict(),
+                description=(
+                    "Search the general web (opt-in: RESEARCHOS_WEB_SEARCH=on). "
+                    "Returns an outcome summary, never page content."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "max_results": {"type": ["integer", "null"], "minimum": 1},
+                    },
+                    "required": ["query"],
+                },
+                output_schema={"type": "object"},
+                tags=["search", "web"],
+            )
+            skill_registry.register_function(
+                name="fetch_source",
+                fn=lambda url: source_fetch.fetch(url).to_dict(),
+                description=(
+                    "Fetch one public HTTP(S) page with size, redirect, robots and "
+                    "private-network limits. Returns a fetch summary."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {"url": {"type": "string"}},
+                    "required": ["url"],
+                },
+                output_schema={"type": "object"},
+                tags=["fetch", "web", "source"],
+            )
             skill_registry.register_function(
                 name="literature_search",
                 fn=lit_search.search,
@@ -420,6 +467,9 @@ def create_app(
         gw: Optional[ModelGateway] = state.get("model_gateway")
         lit_search: Optional[LiteratureSearchSkill] = state.get("literature_search")
         paper_reader_skill: Optional[PaperReaderSkill] = state.get("paper_reader")
+        web_search_skill: Optional[WebSearchSkill] = state.get("web_search")
+        source_fetch_skill: Optional[SourceFetchSkill] = state.get("source_fetch")
+        limits: Optional[ResearchLimits] = state.get("research_limits")
 
         if not ws:
             raise HTTPException(503, detail="Workspace not initialized")
@@ -436,6 +486,9 @@ def create_app(
             paper_reader=paper_reader_skill,
             llm=gw,
             persist=_save_graph,
+            web_search=web_search_skill,
+            source_fetch=source_fetch_skill,
+            limits=limits,
         )
 
         # Thread-safe event queue: workflow runs in a thread; SSE reads here
@@ -492,7 +545,7 @@ def create_app(
                         break
 
                     yield {
-                        "event": ev.get("stage", "stage"),
+                        "event": "task" if ev.get("event") == "task" else ev.get("stage", "stage"),
                         "data": json.dumps(redact_secrets(ev)),
                     }
             finally:
@@ -531,6 +584,10 @@ def create_app(
                     "graph_nodes": result.get("graph_nodes", 0),
                     "graph_edges": result.get("graph_edges", 0),
                     "structured": result.get("structured", {}),
+                    "research_plan": result.get("research_plan", {}),
+                    "tasks": result.get("tasks", []),
+                    "sources": result.get("sources", []),
+                    "citations": result.get("citations", []),
                 })),
             }
 

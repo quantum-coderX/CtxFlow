@@ -15,6 +15,8 @@ ALLOWED_TOOLS: FrozenSet[str] = frozenset(
         "review_writer",
         "memory_query",
         "pack_context",
+        "web_search",
+        "fetch_source",
     }
 )
 

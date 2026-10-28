@@ -62,6 +62,12 @@ class ResearchState(TypedDict, total=False):
     repairs: int
     max_repairs: int
     guard: Dict[str, Any]
+    # -- research plan, parallel tasks and sources -----------------------
+    research_plan: Dict[str, Any]
+    tasks: List[Dict[str, Any]]
+    sources: List[Dict[str, Any]]
+    citations: List[Dict[str, Any]]
+    fresh_sources: bool
     # -- carried between pack and synthesize -----------------------------
     synthesis_data: Dict[str, Any]
     synthesis_ok: bool
@@ -85,6 +91,34 @@ def make_event(
         "run_id": run_id,
         "stage": stage,
         "status": status,
+        "message": message,
+        "ts": now_ts(),
+        "data": data or {},
+    }
+
+
+TASK_EVENT_KINDS = ("task_started", "task_completed", "task_failed", "task_skipped")
+
+
+def make_task_event(
+    *,
+    run_id: str,
+    kind: str,
+    task_id: str,
+    provider: str = "",
+    status: str = "",
+    message: str = "",
+    data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Task-level progress event emitted from inside the ``retrieve`` stage."""
+    return {
+        "event": "task",
+        "kind": kind,
+        "run_id": run_id,
+        "stage": "retrieve",
+        "task_id": task_id,
+        "provider": provider,
+        "status": status or kind.replace("task_", ""),
         "message": message,
         "ts": now_ts(),
         "data": data or {},
