@@ -276,6 +276,60 @@ class PaperReaderSkill:
             "page_count": page_count,
         }
 
+    def read_selected_sections(
+        self,
+        pdf_path: str,
+        *,
+        max_chars_per_section: int = 2500,
+        max_claims_per_section: int = 3,
+    ) -> Dict[str, Any]:
+        """Return bounded introduction, results, and conclusion excerpts."""
+        import re
+
+        wanted = {
+            "introduction": re.compile(r"\b(introduction|intro)\b", re.IGNORECASE),
+            "results": re.compile(r"\bresults?\b", re.IGNORECASE),
+            "conclusion": re.compile(r"\bconclusions?\b", re.IGNORECASE),
+        }
+        selected: Dict[str, PaperSection] = {}
+        for section in extract_sections_from_pdf(pdf_path):
+            title = re.sub(r"^\s*\d+(?:\.\d+)*[\s.:)]*", "", section.title)
+            for key, pattern in wanted.items():
+                if key not in selected and pattern.search(title):
+                    selected[key] = section
+                    break
+
+        content_parts: List[str] = []
+        claims: List[Dict[str, Any]] = []
+        for key in ("introduction", "results", "conclusion"):
+            section = selected.get(key)
+            if section is None:
+                continue
+            text = section.text.strip()[:max_chars_per_section]
+            if not text:
+                continue
+            content_parts.append(f"{section.title}\n{text}")
+            bounded_section = PaperSection(
+                title=section.title,
+                text=text,
+                page_numbers=list(section.page_numbers),
+            )
+            for claim in self._extract_claims_heuristic(bounded_section)[
+                :max_claims_per_section
+            ]:
+                claims.append({
+                    "type": claim.claim_type,
+                    "text": claim.text,
+                    "confidence": claim.confidence,
+                    "tags": claim.tags,
+                    "section": claim.source_section,
+                    "page": claim.page_number,
+                    "extraction_method": "heuristic_pdf_section",
+                    "evidence_kind": "full_text_excerpt",
+                })
+
+        return {"content": "\n\n".join(content_parts), "claims": claims}
+
     def extract_claims(self, pdf_path: str) -> List[ExtractedClaim]:
         """Extract structured claims from a PDF.
 
