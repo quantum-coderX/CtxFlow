@@ -19,6 +19,8 @@ need to know which one ran (the result records ``engine``).
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import logging
 import threading
 import time
@@ -73,8 +75,16 @@ _SYNTHESIS_JSON_SYSTEM = (
     "say so. Return JSON with keys: direct_answer, supporting_evidence "
     "(list of {node_id, note}), contradictory_evidence (list of {node_id, note}), "
     "uncertainties (list of strings), citation_ids (list of node id strings that "
-    "appear in the evidence), follow_ups (list of strings)."
+    "appear in the evidence), follow_ups (list of strings). "
+    "Project memory items, when present, were selected from durable CtxFlow "
+    "memory (with a selector score and reason) as background only: use them to "
+    "interpret the task, never cite Memory IDs as evidence, and flag any "
+    "conflict between memory and evidence as an uncertainty."
 )
+
+# Share of the run token budget reserved for durable project memory context.
+_MEMORY_BUDGET_FRACTION = 0.25
+_MEMORY_TIMEOUT_S = 10.0
 
 
 def _orchestrator_preference() -> str:
@@ -106,6 +116,8 @@ class ResearchWorkflow:
         web_search: Optional[WebSearchSkill] = None,
         source_fetch: Optional[SourceFetchSkill] = None,
         limits: Optional[ResearchLimits] = None,
+        context_provider: Any = None,
+        memory_loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> None:
         self.ctxflow = ctxflow
         self.literature_search = literature_search
@@ -118,6 +130,10 @@ class ResearchWorkflow:
         self.max_wall_s = max_wall_s
         self.max_tool_calls = max_tool_calls
         self.max_repairs = max(0, int(max_repairs))
+        # Optional durable-memory provider (greedy or Laya) and the event loop
+        # that owns its store; the workflow itself runs on a worker thread.
+        self.context_provider = context_provider
+        self.memory_loop = memory_loop
 
         # Per-run state (reset by ``_begin_run``).
         self._events: List[Dict[str, Any]] = []
@@ -145,6 +161,7 @@ class ResearchWorkflow:
         token_budget: int = 2048,
         on_event: Optional[EventCallback] = None,
         cancel_event: Optional[threading.Event] = None,
+        previous_context_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         self._begin_run(run_id, on_event, cancel_event)
         state = self._initial_state(
@@ -155,6 +172,7 @@ class ResearchWorkflow:
             conversation_history or [],
             token_budget,
         )
+        state["previous_context_ids"] = list(previous_context_ids or [])
 
         try:
             for stage in (
@@ -252,6 +270,10 @@ class ResearchWorkflow:
             "stop_status": "",
             "blocked": False,
             "engine": self.engine,
+            "previous_context_ids": [],
+            "memory_context": [],
+            "memory_context_ids": [],
+            "memory_selector": "",
         }
 
     def _emit(
@@ -590,8 +612,117 @@ class ResearchWorkflow:
                 "edges": self.ctxflow.graph.edge_count,
             },
         )
+        self._load_memory_context(state)
         self._maybe_stop(state)
         return state
+
+    @staticmethod
+    def _memory_alerts(state: ResearchState) -> List[Dict[str, Any]]:
+        return [a for a in state.get("alerts") or [] if a.get("type") == "memory"]
+
+    @staticmethod
+    def _task_profile(state: ResearchState) -> tuple[str, List[str]]:
+        """Describe the run for task-aware (Laya) memory selection."""
+        intent = str(state.get("intent") or "unknown")
+        skills = sorted(
+            {
+                str(provider)
+                for task in state.get("tasks") or []
+                for provider in task.get("providers") or []
+            }
+        )
+        return f"research:{intent}", skills
+
+    def _await_memory(self, coro: Any) -> Any:
+        """Run a provider coroutine from the (synchronous) workflow thread."""
+        loop = self.memory_loop
+        if loop is not None and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            try:
+                return future.result(timeout=_MEMORY_TIMEOUT_S)
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                raise TimeoutError(
+                    f"memory retrieval exceeded {_MEMORY_TIMEOUT_S:.0f}s"
+                ) from None
+        return asyncio.run(asyncio.wait_for(coro, _MEMORY_TIMEOUT_S))
+
+    def _load_memory_context(self, state: ResearchState) -> None:
+        provider = self.context_provider
+        if provider is None or state.get("stop"):
+            return
+        selector = str(getattr(provider, "selector_name", type(provider).__name__))
+        task_description, skills = self._task_profile(state)
+        budget = max(0, int(state["token_budget"] * _MEMORY_BUDGET_FRACTION))
+        self._emit(
+            "memory",
+            "started",
+            f"Selecting durable project memory ({selector}).",
+            {"selector": selector, "token_budget": budget},
+        )
+        started = time.monotonic()
+        try:
+            records = self._await_memory(
+                provider.retrieve(
+                    project_id=state["project_id"],
+                    query=state["query"],
+                    token_budget=budget,
+                    task_description=task_description,
+                    required_skills=skills,
+                    previous_context_ids=list(state.get("previous_context_ids") or []),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — memory is optional; degrade, never fail
+            logger.warning("Memory context retrieval failed: %s", exc)
+            state["degraded"] = True
+            state["alerts"] = list(state.get("alerts") or []) + [
+                {
+                    "type": "memory",
+                    "message": f"Durable memory context unavailable: {exc}",
+                }
+            ]
+            self._emit("memory", "degraded", f"Memory context unavailable: {exc}")
+            return
+
+        items = [
+            {
+                "memory_id": record.memory_id,
+                "text": record.text,
+                "tokens": int(record.tokens),
+                "memory_type": record.memory_type,
+                "validity": record.validity,
+                "score": round(float(record.score), 4),
+                "reason": str(getattr(record, "reason", "") or ""),
+                "source_type": getattr(record, "source_type", None),
+                "source_id": getattr(record, "source_id", None),
+            }
+            for record in records or []
+        ]
+        state["memory_context"] = items
+        state["memory_context_ids"] = [item["memory_id"] for item in items]
+        state["memory_selector"] = selector
+        self._emit(
+            "memory",
+            "completed",
+            f"Selected {len(items)} memory item(s) via {selector}.",
+            {
+                "selector": selector,
+                "task": task_description,
+                "required_skills": skills,
+                "selected": len(items),
+                "tokens_used": sum(item["tokens"] for item in items),
+                "token_budget": budget,
+                "latency_ms": round((time.monotonic() - started) * 1000, 1),
+                "decisions": [
+                    {
+                        "memory_id": item["memory_id"],
+                        "score": item["score"],
+                        "reason": item["reason"],
+                    }
+                    for item in items
+                ],
+            },
+        )
 
     # -- stage E: pack ---------------------------------------------------
     def _stage_pack(self, state: ResearchState) -> ResearchState:
@@ -658,6 +789,9 @@ class ResearchWorkflow:
             packed_ids,
             conversation_history=state.get("conversation_history") or [],
             token_budget=state["token_budget"],
+            memory_context=state.get("memory_context") or [],
+            task_profile=self._task_profile(state),
+            memory_selector=str(state.get("memory_selector") or ""),
         )
         if structured:
             state["structured"] = structured
@@ -678,7 +812,9 @@ class ResearchWorkflow:
                 state["errors"] = list(state.get("errors") or []) + [
                     state.get("synthesis_error") or "synthesis failed"
                 ]
-        state["alerts"] = list(synth_data.get("alerts") or [])
+        state["alerts"] = self._memory_alerts(state) + list(
+            synth_data.get("alerts") or []
+        )
         self._emit(
             "synthesize",
             "completed" if state.get("synthesis_ok", True) else "degraded",
@@ -714,7 +850,11 @@ class ResearchWorkflow:
         extra_alerts = self._citation_guard(
             state["cited_nodes"], packed_ids, self.ctxflow
         )
-        alerts = list(critic_data.get("alerts") or []) + extra_alerts
+        alerts = self._memory_alerts(state) + [
+            item
+            for item in critic_data.get("alerts") or []
+            if item.get("type") != "memory"
+        ] + extra_alerts
         citations, source_alerts = self._resolve_citations(
             state["cited_nodes"], self.ctxflow
         )
@@ -812,6 +952,9 @@ class ResearchWorkflow:
         *,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         token_budget: int = 2048,
+        memory_context: Optional[List[Dict[str, Any]]] = None,
+        task_profile: Optional[tuple[str, List[str]]] = None,
+        memory_selector: str = "",
     ) -> Optional[Dict[str, Any]]:
         llm = self.llm
         complete_json = getattr(llm, "complete_json", None)
@@ -835,8 +978,33 @@ class ResearchWorkflow:
         history_section = (
             f"\n\n{conversation_context}" if conversation_context else ""
         )
+        task_section = ""
+        if task_profile is not None:
+            task_type, skills = task_profile
+            task_section = (
+                f"\n\nTask type: {task_type}\nRequired skills: "
+                f"{', '.join(skills) if skills else 'none'}"
+            )
+        memory_section = ""
+        if memory_context:
+            memory_blocks = [
+                wrap_untrusted(
+                    f"[Memory:{item.get('memory_id')}] ({item.get('memory_type')}, "
+                    f"validity={item.get('validity')}, score={item.get('score')}, "
+                    f"reason={item.get('reason') or 'n/a'}) "
+                    f"{str(item.get('text') or '')[:400]}",
+                    source=f"memory:{item.get('memory_id')}",
+                )
+                for item in memory_context
+            ]
+            memory_section = (
+                f"\n\nProject memory (background, selected by "
+                f"{memory_selector or 'memory provider'}; not citable):\n"
+                + "\n\n".join(memory_blocks)
+            )
         prompt = (
-            f"Question: {query}{history_section}\n\nEvidence:\n"
+            f"Question: {query}{task_section}{history_section}{memory_section}"
+            "\n\nEvidence:\n"
             + "\n\n".join(evidence_blocks)
             + "\n\nAllowed node IDs: "
             + ", ".join(packed_ids)
@@ -1040,6 +1208,9 @@ class ResearchWorkflow:
             "degraded": bool(state.get("degraded")),
             "repairs": int(state.get("repairs") or 0),
             "excluded_node_ids": state.get("excluded_node_ids") or [],
+            "memory_context": state.get("memory_context") or [],
+            "memory_context_ids": state.get("memory_context_ids") or [],
+            "memory_selector": state.get("memory_selector") or "",
             "events": events,
             "graph_nodes": self.ctxflow.graph.node_count,
             "graph_edges": self.ctxflow.graph.edge_count,
@@ -1077,6 +1248,8 @@ class ResearchGraph(ResearchWorkflow):
         web_search: Optional[WebSearchSkill] = None,
         source_fetch: Optional[SourceFetchSkill] = None,
         limits: Optional[ResearchLimits] = None,
+        context_provider: Any = None,
+        memory_loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> None:
         super().__init__(
             ctxflow,
@@ -1090,6 +1263,8 @@ class ResearchGraph(ResearchWorkflow):
             web_search=web_search,
             source_fetch=source_fetch,
             limits=limits,
+            context_provider=context_provider,
+            memory_loop=memory_loop,
         )
         self._checkpointer = checkpointer
         self._compiled: Any = None
@@ -1209,6 +1384,7 @@ class ResearchGraph(ResearchWorkflow):
         token_budget: int = 2048,
         on_event: Optional[EventCallback] = None,
         cancel_event: Optional[threading.Event] = None,
+        previous_context_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         self._begin_run(run_id, on_event, cancel_event)
         state = self._initial_state(
@@ -1219,6 +1395,7 @@ class ResearchGraph(ResearchWorkflow):
             conversation_history or [],
             token_budget,
         )
+        state["previous_context_ids"] = list(previous_context_ids or [])
         config = {
             "configurable": {"thread_id": run_id},
             "recursion_limit": 50,
@@ -1278,6 +1455,8 @@ def build_orchestrator(
     web_search: Optional[WebSearchSkill] = None,
     source_fetch: Optional[SourceFetchSkill] = None,
     limits: Optional[ResearchLimits] = None,
+    context_provider: Any = None,
+    memory_loop: Optional[asyncio.AbstractEventLoop] = None,
 ) -> ResearchWorkflow:
     """Return the preferred orchestrator for this process.
 
@@ -1296,6 +1475,8 @@ def build_orchestrator(
         "web_search": web_search,
         "source_fetch": source_fetch,
         "limits": limits,
+        "context_provider": context_provider,
+        "memory_loop": memory_loop,
     }
     if _orchestrator_preference() == "langgraph" and maybe_langgraph_available():
         return ResearchGraph(ctxflow, checkpointer=checkpointer, **kwargs)

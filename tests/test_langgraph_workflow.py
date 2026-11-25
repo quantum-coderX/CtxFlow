@@ -213,6 +213,80 @@ def test_build_orchestrator_honours_env_switch(corpus, monkeypatch):
     assert isinstance(build_orchestrator(corpus), ResearchWorkflow)
 
 
+@pytest.mark.parametrize("engine", [ResearchGraph, ResearchWorkflow])
+@pytest.mark.parametrize("owned_loop", [False, True])
+def test_laya_memory_context_reaches_synthesis(corpus, engine, owned_loop):
+    """Laya-selected durable memory flows into the task-aware System 2 prompt."""
+    import asyncio
+    import threading
+
+    from ctxflow.laya_provider import LayaMemoryContextProvider
+    from ctxflow.laya_selector import HeuristicLayaRouter, LayaContextSelector
+    from ctxflow.memory import InMemoryMemoryStore
+    from ctxflow.memory.store import Memory, MemoryType, ValidityState
+
+    store = InMemoryMemoryStore()
+
+    async def seed() -> None:
+        await store.add(
+            Memory(
+                id="mem-decision",
+                text="Team decision: evaluate long-context retrieval on recall.",
+                memory_type=MemoryType.DECISION,
+                project_id="demo",
+                importance=0.9,
+            )
+        )
+        await store.add(
+            Memory(
+                id="mem-old",
+                text="Long-context retrieval is solved by bigger windows.",
+                memory_type=MemoryType.FACT,
+                project_id="demo",
+                validity=ValidityState.SUPERSEDED,
+            )
+        )
+
+    asyncio.run(seed())
+    provider = LayaMemoryContextProvider(
+        store, selector=LayaContextSelector(store, router=HeuristicLayaRouter())
+    )
+
+    prompts: List[str] = []
+
+    class RecordingModel:
+        def __call__(self, prompt, system=""):
+            return "answer"
+
+        def complete_json(self, prompt, system=""):
+            prompts.append(prompt)
+            return {"direct_answer": "Grounded answer.", "citation_ids": []}
+
+    loop = None
+    if owned_loop:
+        loop = asyncio.new_event_loop()
+        threading.Thread(target=loop.run_forever, daemon=True).start()
+    try:
+        workflow = engine(
+            corpus, llm=RecordingModel(), context_provider=provider, memory_loop=loop
+        )
+        result = workflow.run(
+            QUERY, run_id=f"mem-{engine.__name__}-{owned_loop}", project_id="demo"
+        )
+    finally:
+        if loop is not None:
+            loop.call_soon_threadsafe(loop.stop)
+
+    assert result["success"] is True
+    assert result["memory_selector"] == "laya:heuristic"
+    assert result["memory_context_ids"] == ["mem-decision"]
+    assert result["memory_context"][0]["reason"] == "task_match"
+    assert prompts, "structured synthesis should have been called"
+    assert "[Memory:mem-decision]" in prompts[0]
+    assert "mem-old" not in prompts[0]
+    assert "Task type: research:" in prompts[0]
+
+
 def test_stream_api_reports_engine(client):
     """The demo endpoint runs the graph and reports which engine served it."""
     client.post("/api/demo/seed", json={"project_id": "stream-engine"})

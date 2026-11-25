@@ -14,9 +14,7 @@ A schema-agnostic, incrementally-built graph memory framework for LLM agents.
 
 ## Layer 1 delivery status
 
-The Christo-owned memory work is tracked in
-[`docs/team/CHRISTO.md`](docs/team/CHRISTO.md). The following deliverables are
-implemented and locally verified:
+The following memory deliverables are implemented and locally verified:
 
 - project-scoped memory records and fail-closed in-memory/PostgreSQL retrieval;
 - atomic supersession and degree-cap regression coverage;
@@ -48,6 +46,13 @@ python -m researchos.eval
 
 The optional `ContextProvider` is now wired into `create_app(memory_store=...)`
 behind `RESEARCHOS_MEMORY_ENABLED`; the default app remains memory-disabled.
+When enabled, every research run's `memory` stage retrieves durable project
+memory (25% of the run token budget) and passes it to structured synthesis as
+non-citable background. Set `LAYA_CONTEXT_SELECTION=true` to replace greedy
+packing with the Laya System-1 selector (`ctxflow.laya_provider`); without the
+`laya` package installed it uses a deterministic `HeuristicLayaRouter`. Run
+results expose `memory_context`, `memory_context_ids`, and `memory_selector`,
+and the previous turn's IDs feed Laya's continuity signal.
 The built-in memory stores now expose optional append-only
 `append_run_event()` and `verify_run_event_chain()` capabilities. These methods
 are deliberately not required by the shared `MemoryStore` protocol.
@@ -57,9 +62,35 @@ against a separate staging database. No staging configuration is present in
 this checkout, so the source database has not been used as a restore target.
 
 The existing rehearsal command validates a custom backup archive with
-`pg_restore --list` without modifying the source database. See
-[`docs/ctxflow_s7_rollback.md`](docs/ctxflow_s7_rollback.md) for the safe
-staging and rollback procedure.
+`pg_restore --list` without modifying the source database. Backup and restore
+are driven by [`scripts/backup_restore.py`](scripts/backup_restore.py); always
+restore into a separate staging database, never the source.
+
+---
+
+## Docker
+
+```bash
+# .env must define DB_PASSWORD (see .env.example for the other variables)
+docker compose up --build                # PostgreSQL+pgvector and the API/UI on :8000
+docker compose --profile ollama up       # adds a local Ollama model server
+docker compose --profile dev up          # adds the Vite dev server on :5173
+```
+
+- Migrations in `migrations/` are applied once, when the `pgdata` volume is first created.
+- Project graphs are stored in PostgreSQL (`project_graph_*` tables, migration `006`) when
+  `RESEARCHOS_GRAPH_BACKEND=postgres`, which compose sets by default; outside compose the
+  default is the JSON files under `RESEARCHOS_DATA_DIR`. Existing JSON graphs are imported
+  into PostgreSQL on first load. Existing `pgdata` volumes need `migrations/006_project_graph.sql`
+  applied by hand, because init scripts only run on an empty volume.
+- Run records and project metadata still live in `RESEARCHOS_DATA_DIR`.
+- `INSTALL_LAYA=false` (build arg) skips the Laya extra (torch) for a much smaller image.
+- Set `RESEARCHOS_MODEL_PROVIDER=ollama` and `RESEARCHOS_MODEL_BASE_URL=http://ollama:11434/v1` to use the Ollama service.
+- The Laya extra requires Python 3.10+: `pip install "ctxflow[laya]"`.
+- The graph view loads through the paged `GET /api/graph/page?project_id=&cursor=&limit=` endpoint.
+- Durable memory is browsable by storage tier (hot/warm/cold) through `GET /api/memory/page`
+  and the UI's Memory tab. `advise=true` adds Laya tier proposals when `LAYA_TIERING=true`;
+  proposals are advisory and never override the deterministic tier rules.
 
 ---
 

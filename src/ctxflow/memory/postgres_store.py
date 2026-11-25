@@ -7,14 +7,18 @@ import json
 from typing import Iterable, Sequence
 
 from ctxflow.memory.store import (
+    HOT_IMPORTANCE,
+    HOT_WINDOW,
     Edge,
     Memory,
+    MemoryPage,
     MemoryStore,
     MemoryTier,
     MemoryType,
     MemoryVersion,
     Relation,
     ScoredId,
+    StorageTier,
     Subgraph,
     SourceType,
     ValidityState,
@@ -339,6 +343,70 @@ class PostgresMemoryStore:
             [item for item in memories if item is not None],
             list(selected_edges.values()),
         )
+
+    async def list_page(
+        self,
+        *,
+        project_id: str = "default",
+        cursor: str | None = None,
+        limit: int = 100,
+        tier: StorageTier | None = None,
+        types: Iterable[MemoryType] | None = None,
+        now: datetime | None = None,
+    ) -> MemoryPage:
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        current = now or datetime.now(timezone.utc)
+        type_values = [item.value for item in types] if types is not None else None
+        # Tier predicate mirrors ctxflow.memory.store.storage_tier.
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                """SELECT * FROM memories
+                WHERE project_id=$1
+                  AND ($2::text IS NULL OR id > $2)
+                  AND ($3::text[] IS NULL OR memory_type = ANY($3))
+                  AND ($4::text IS NULL OR (
+                      CASE WHEN archived OR validity IN ('superseded', 'stale')
+                               THEN 'cold'
+                           WHEN tier = 'working' OR importance >= $5
+                                OR created_at >= $6::timestamptz
+                               THEN 'hot'
+                           ELSE 'warm' END) = $4)
+                ORDER BY id LIMIT $7""",
+                project_id, cursor, type_values,
+                tier.value if tier is not None else None,
+                HOT_IMPORTANCE, current - HOT_WINDOW, limit + 1,
+            )
+        memories = [item for item in (_memory_from_row(r) for r in rows[:limit]) if item]
+        next_cursor = memories[-1].id if len(rows) > limit and memories else None
+        return MemoryPage(memories, next_cursor)
+
+    async def edges_for(
+        self,
+        memory_ids: Sequence[str],
+        *,
+        project_id: str = "default",
+        direction: str = "out",
+    ) -> list[Edge]:
+        if direction not in {"both", "in", "out"}:
+            raise ValueError("direction must be 'both', 'in', or 'out'")
+        if not memory_ids:
+            return []
+        async with self.pool.acquire() as connection:
+            rows = await connection.fetch(
+                """SELECT src, dst, relation, weight, confidence, created_by,
+                created_at FROM graph_edges
+                WHERE (($2='out' AND src=ANY($1::text[]))
+                    OR ($2='in' AND dst=ANY($1::text[]))
+                    OR ($2='both' AND (src=ANY($1::text[]) OR dst=ANY($1::text[]))))
+                  AND EXISTS (SELECT 1 FROM memories ms
+                              WHERE ms.id=graph_edges.src AND ms.project_id=$3)
+                  AND EXISTS (SELECT 1 FROM memories md
+                              WHERE md.id=graph_edges.dst AND md.project_id=$3)
+                ORDER BY src, dst, relation""",
+                list(memory_ids), direction, project_id,
+            )
+        return [_edge_from_row(row) for row in rows]
 
     async def get_version_history(
         self, memory_id: str, *, project_id: str = "default"

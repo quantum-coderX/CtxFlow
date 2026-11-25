@@ -12,6 +12,13 @@ Public API surface:
 - :class:`Extractor`, :class:`DefaultExtractor` — pluggable extraction.
 - :class:`LLMExtractor` — LLM-powered extraction.
 - :class:`ContradictionDetector` — supersession/contradiction detection.
+
+**Laya Integration (System-1 Context Selection):**
+
+- :class:`LayaContextSelector` — fast non-autoregressive decision model for
+  learned context selection (task-aware, tool-aware, session-continuous).
+- :class:`LayaMemoryContextProvider` — context provider using Laya for
+  intelligent memory retrieval with calibrated confidence scores.
 """
 
 from __future__ import annotations
@@ -23,6 +30,8 @@ from ctxflow.extraction_cache import ExtractionCache, InMemoryExtractionCache
 from ctxflow.extractors import DefaultExtractor, Extractor
 from ctxflow.governance import GovernanceEngine
 from ctxflow.graph import ContextGraph
+from ctxflow.laya_selector import LayaContextSelector
+from ctxflow.laya_provider import LayaMemoryContextProvider
 from ctxflow.llm_extractor import LLMExtractor
 from ctxflow.models import (
     ContradictionResult,
@@ -61,6 +70,8 @@ __all__ = [
     "ContradictionDetector",
     "ExtractionCache",
     "InMemoryExtractionCache",
+    "LayaContextSelector",
+    "LayaMemoryContextProvider",
 ]
 
 
@@ -389,11 +400,15 @@ class CtxFlow:
             ``"json"`` (default) or ``"binary"`` (MessagePack).
         """
         if format == "json":
-            self._graph = import_json(path)
+            self.load_graph(import_json(path))
         elif format == "binary":
-            self._graph = import_binary(path)
+            self.load_graph(import_binary(path))
         else:
             raise ValueError(f"Unknown format: {format!r}. Use 'json' or 'binary'.")
+
+    def load_graph(self, graph: ContextGraph) -> None:
+        """Replace the current graph with *graph* and rebuild dependent engines."""
+        self._graph = graph
         # Rebuild internal references.
         self._query_engine = QueryEngine(
             self._config, self._extractor, self._governance

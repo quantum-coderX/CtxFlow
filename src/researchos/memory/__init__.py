@@ -5,6 +5,7 @@ from researchos.memory.context import (
     ContextRecord,
     MemoryContextProvider,
     create_context_provider,
+    laya_enabled,
     memory_enabled,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "ContextRecord",
     "MemoryContextProvider",
     "create_context_provider",
+    "laya_enabled",
     "memory_enabled",
 ]

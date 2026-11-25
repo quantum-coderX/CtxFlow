@@ -17,6 +17,9 @@ graphify-out/
 build/
 dist/
 
+# rust build output
+rust/target/
+
 # scratch notes
 s52_fixed.txt
 test456.txt

@@ -32,9 +32,8 @@ class GovernanceEngine:
 
         if not graph.has_node(edge.source_id) or not graph.has_node(edge.target_id):
             return False
-        replacing = any(
-            existing.target_id == edge.target_id
-            for existing in graph.get_edges_from(edge.source_id)
+        replacing = graph.has_edge(
+            edge.source_id, edge.target_id, edge.relation_type
         )
         if not replacing and not self.can_add_edge(graph, edge.source_id):
             return False

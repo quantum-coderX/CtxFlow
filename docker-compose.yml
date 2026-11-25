@@ -1,0 +1,85 @@
+name: ctxflow
+
+# docker compose up --build            -> db + api (UI served at http://localhost:8000)
+# docker compose --profile ollama up   -> adds a local Ollama model server
+# docker compose --profile dev up      -> adds the Vite dev server (http://localhost:5173)
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${DB_NAME:-ctxflow}
+      POSTGRES_USER: ${DB_USER:-ctxflow}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Applied once, on first start of an empty volume, in filename order.
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      args:
+        INSTALL_LAYA: ${INSTALL_LAYA:-true}
+        INSTALL_LOCAL_EMBEDDINGS: ${INSTALL_LOCAL_EMBEDDINGS:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-ctxflow}
+      DB_USER: ${DB_USER:-ctxflow}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      RESEARCHOS_MEMORY_ENABLED: ${RESEARCHOS_MEMORY_ENABLED:-true}
+      RESEARCHOS_GRAPH_BACKEND: ${RESEARCHOS_GRAPH_BACKEND:-postgres}
+      LAYA_CONTEXT_SELECTION: ${LAYA_CONTEXT_SELECTION:-false}
+      LAYA_TIERING: ${LAYA_TIERING:-false}
+      RESEARCHOS_MODEL_ENABLED: ${RESEARCHOS_MODEL_ENABLED:-0}
+      RESEARCHOS_MODEL_PROVIDER: ${RESEARCHOS_MODEL_PROVIDER:-groq}
+      RESEARCHOS_MODEL_ID: ${RESEARCHOS_MODEL_ID:-}
+      RESEARCHOS_MODEL_BASE_URL: ${RESEARCHOS_MODEL_BASE_URL:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      RESEARCHOS_WEB_SEARCH: ${RESEARCHOS_WEB_SEARCH:-off}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - researchos_data:/data
+    restart: unless-stopped
+
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+    # Point the API at it: RESEARCHOS_MODEL_PROVIDER=ollama
+    # RESEARCHOS_MODEL_BASE_URL=http://ollama:11434/v1
+
+  frontend:
+    profiles: ["dev"]
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_TARGET: http://api:8000
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  researchos_data:
+  ollama:
+  frontend_node_modules:

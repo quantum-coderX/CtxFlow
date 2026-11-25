@@ -34,9 +34,16 @@ class DatabaseConfig:
 
 
 def load_database_config(dotenv_path: str | Path | None = None) -> DatabaseConfig:
-    """Load and validate PostgreSQL settings without constructing a URL."""
+    """Load and validate PostgreSQL settings without constructing a URL.
 
-    values = dotenv_values(dotenv_path) if dotenv_path is not None else dotenv_values()
+    An explicit ``dotenv_path`` is authoritative. Without one, process
+    environment variables take precedence over a local ``.env`` (containers).
+    """
+
+    if dotenv_path is not None:
+        values = dotenv_values(dotenv_path)
+    else:
+        values = {**dotenv_values(), **{k: v for k, v in os.environ.items() if v}}
     missing = [name for name in _REQUIRED_DATABASE_VARIABLES if not values.get(name)]
     if missing:
         raise ValueError(

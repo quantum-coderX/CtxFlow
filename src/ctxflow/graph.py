@@ -1,9 +1,9 @@
 """Core graph engine — schema-agnostic, in-memory, backed by NetworkX.
 
-ContextGraph owns the underlying nx.DiGraph and provides O(1) node/edge
-insertion, BFS traversal, and tag-based candidate retrieval. It does NOT
-implement scoring or governance — those are separate modules that operate
-on the graph.
+ContextGraph owns the underlying nx.MultiDiGraph (one edge per
+``(source, target, relation)``) and provides O(1) node/edge insertion, BFS
+traversal, and tag-based candidate retrieval. It does NOT implement scoring or
+governance — those are separate modules that operate on the graph.
 """
 
 from __future__ import annotations
@@ -14,18 +14,19 @@ from typing import Dict, List, Optional, Set, Tuple
 import networkx as nx
 
 from ctxflow.models import Edge, Node, NodeStatus, ProvenanceChain, ProvenanceStep
+from ctxflow.vocabulary import RelationCategory, relations_in
 
 
 class ContextGraph:
-    """In-memory directed graph wrapping ``networkx.DiGraph``.
+    """In-memory typed multigraph wrapping ``networkx.MultiDiGraph``.
 
-    Nodes are stored as graph-node attributes keyed by ``node.id``.
-    Edges carry ``relation_type``, ``weight``, ``timestamp``, and
-    ``metadata`` as edge-data attributes.
+    Nodes are stored as graph-node attributes keyed by ``node.id``. Several
+    edges may connect the same pair when their relation types differ; adding
+    the same ``(source, target, relation)`` again replaces that edge.
     """
 
     def __init__(self) -> None:
-        self._g: nx.DiGraph = nx.DiGraph()
+        self._g: nx.MultiDiGraph = nx.MultiDiGraph()
         # Fast lookup: tag → set of node IDs that have this tag.
         self._tag_index: Dict[str, Set[str]] = {}
 
@@ -76,6 +77,22 @@ class ContextGraph:
         """Return all nodes (order is insertion-dependent)."""
         return [self._g.nodes[nid]["data"] for nid in self._g.nodes]
 
+    def page_nodes(
+        self, after: Optional[str] = None, limit: int = 500
+    ) -> Tuple[List[Node], Optional[str]]:
+        """Return up to *limit* nodes ordered by id, strictly after the *after* cursor.
+
+        The second value is the cursor for the next page, or ``None`` when the
+        last page was returned. Keyset paging stays stable if nodes are added
+        between calls (new ids sort into place instead of shifting offsets).
+        """
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        ids = sorted(nid for nid in self._g.nodes if after is None or nid > after)
+        page = ids[:limit]
+        next_cursor = page[-1] if len(ids) > limit else None
+        return [self._g.nodes[nid]["data"] for nid in page], next_cursor
+
     def get_nodes_by_status(self, status: str) -> List[Node]:
         """Return all nodes with the given status.
 
@@ -99,6 +116,8 @@ class ContextGraph:
             weight=data.get("weight", 1.0),
             timestamp=data.get("timestamp", 0.0),
             metadata=data.get("metadata", {}),
+            confidence=data.get("confidence", 1.0),
+            created_by=data.get("created_by", "rule"),
         )
 
     def add_edge(self, edge: Edge) -> bool:
@@ -108,22 +127,52 @@ class ContextGraph:
         self._g.add_edge(
             edge.source_id,
             edge.target_id,
+            key=edge.relation_type,
             relation_type=edge.relation_type,
             weight=edge.weight,
             timestamp=edge.timestamp,
             metadata=edge.metadata,
+            confidence=edge.confidence,
+            created_by=edge.created_by,
         )
         return True
 
-    def remove_edge(self, source_id: str, target_id: str) -> Optional[Edge]:
-        """Remove one directed edge and return its previous value."""
+    def has_edge(
+        self, source_id: str, target_id: str, relation_type: Optional[str] = None
+    ) -> bool:
+        if relation_type is None:
+            return self._g.has_edge(source_id, target_id)
+        return self._g.has_edge(source_id, target_id, key=relation_type)
 
+    def get_edges_between(self, source_id: str, target_id: str) -> List[Edge]:
+        """Return every parallel edge from *source_id* to *target_id*."""
         if not self._g.has_edge(source_id, target_id):
+            return []
+        return [
+            self._edge_from_data(source_id, target_id, data)
+            for data in self._g[source_id][target_id].values()
+        ]
+
+    def remove_edge(
+        self,
+        source_id: str,
+        target_id: str,
+        relation_type: Optional[str] = None,
+    ) -> Optional[Edge]:
+        """Remove one edge, or every parallel edge when *relation_type* is omitted.
+
+        Returns the first removed edge, or ``None`` if nothing matched.
+        """
+        edges = [
+            edge
+            for edge in self.get_edges_between(source_id, target_id)
+            if relation_type is None or edge.relation_type == relation_type
+        ]
+        if not edges:
             return None
-        data = dict(self._g.get_edge_data(source_id, target_id) or {})
-        edge = self._edge_from_data(source_id, target_id, data)
-        self._g.remove_edge(source_id, target_id)
-        return edge
+        for edge in edges:
+            self._g.remove_edge(source_id, target_id, key=edge.relation_type)
+        return edges[0]
 
     def get_edges_from(self, node_id: str) -> List[Edge]:
         """Return all outgoing edges from *node_id*."""
@@ -224,14 +273,14 @@ class ContextGraph:
 
     # -- Provenance traversal -----------------------------------------------
 
-    # Edge types that represent provenance (backward-walkable).
-    _PROVENANCE_EDGE_TYPES: Set[str] = {
-        "follows", "derived_from", "extracted_from", "references",
-    }
-    # Edge types that represent contradiction / supersession.
-    _CONTRADICTION_EDGE_TYPES: Set[str] = {
-        "supersedes", "contradicts",
-    }
+    # Category membership comes from the vocabulary registry at call time.
+    @staticmethod
+    def _provenance_relations() -> frozenset:
+        return relations_in(RelationCategory.PROVENANCE)
+
+    @staticmethod
+    def _contradiction_relations() -> frozenset:
+        return relations_in(RelationCategory.CONTRADICTION)
 
     def trace_provenance(
         self,
@@ -269,6 +318,8 @@ class ContextGraph:
             )
 
         steps: List[ProvenanceStep] = [ProvenanceStep(node=root, edge=None)]
+        provenance_relations = self._provenance_relations()
+        contradiction_relations = self._contradiction_relations()
         contradictions: List[Tuple[Node, Edge]] = []
         visited: Set[str] = {node_id}
 
@@ -282,7 +333,7 @@ class ContextGraph:
 
             # Check incoming edges (we walk backward: target -> source).
             for edge in self.get_edges_to(current_id):
-                if edge.relation_type in self._PROVENANCE_EDGE_TYPES:
+                if edge.relation_type in provenance_relations:
                     if edge.source_id not in visited:
                         visited.add(edge.source_id)
                         source_node = self.get_node(edge.source_id)
@@ -294,13 +345,13 @@ class ContextGraph:
 
             # Also check for contradiction edges touching this node.
             for edge in self.get_edges_to(current_id):
-                if edge.relation_type in self._CONTRADICTION_EDGE_TYPES:
+                if edge.relation_type in contradiction_relations:
                     contra_node = self.get_node(edge.source_id)
                     if contra_node is not None:
                         contradictions.append((contra_node, edge))
 
             for edge in self.get_edges_from(current_id):
-                if edge.relation_type in self._CONTRADICTION_EDGE_TYPES:
+                if edge.relation_type in contradiction_relations:
                     contra_node = self.get_node(edge.target_id)
                     if contra_node is not None:
                         contradictions.append((contra_node, edge))
@@ -359,6 +410,6 @@ class ContextGraph:
     # -- Internals (for serialization) --------------------------------------
 
     @property
-    def _graph(self) -> nx.DiGraph:
+    def _graph(self) -> nx.MultiDiGraph:
         """Direct access to the underlying NetworkX graph (for serialization)."""
         return self._g

@@ -65,6 +65,8 @@ def _edge_to_dict(edge: Edge) -> Dict[str, Any]:
         "weight": edge.weight,
         "timestamp": edge.timestamp,
         "metadata": edge.metadata,
+        "confidence": edge.confidence,
+        "created_by": edge.created_by,
     }
 
 
@@ -77,6 +79,8 @@ def _dict_to_edge(d: Dict[str, Any]) -> Edge:
         weight=d.get("weight", 1.0),
         timestamp=d.get("timestamp", 0.0),
         metadata=d.get("metadata", {}),
+        confidence=d.get("confidence", 1.0),
+        created_by=d.get("created_by", "rule"),
     )
 
 

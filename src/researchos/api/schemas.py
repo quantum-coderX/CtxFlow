@@ -130,6 +130,8 @@ class EdgeResponse(BaseModel):
     relation_type: str = "related_to"
     weight: float = 1.0
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 1.0
+    created_by: str = "rule"
 
 
 class GraphStatsResponse(BaseModel):
@@ -147,6 +149,50 @@ class GraphDataResponse(BaseModel):
 
     nodes: List[NodeResponse] = Field(default_factory=list)
     edges: List[EdgeResponse] = Field(default_factory=list)
+
+
+class MemoryItemResponse(BaseModel):
+    """One durable memory in a page."""
+
+    id: str
+    text: str
+    memory_type: str
+    tier: str
+    storage_tier: str
+    validity: str
+    importance: float = 0.0
+    access_count: int = 0
+    created_at: str
+    proposed_tier: Optional[str] = None
+    tier_reason: Optional[str] = None
+    tier_router: Optional[str] = None
+
+
+class MemoryEdgeResponse(BaseModel):
+    src: str
+    dst: str
+    relation: str
+    weight: float = 1.0
+    confidence: float = 1.0
+    created_by: str = "rule"
+
+
+class MemoryPageResponse(BaseModel):
+    """A bounded page of durable memory plus its outgoing edges."""
+
+    memories: List[MemoryItemResponse] = Field(default_factory=list)
+    edges: List[MemoryEdgeResponse] = Field(default_factory=list)
+    next_cursor: Optional[str] = None
+
+
+class GraphPageResponse(BaseModel):
+    """One page of graph nodes plus the edges that start at those nodes."""
+
+    nodes: List[NodeResponse] = Field(default_factory=list)
+    edges: List[EdgeResponse] = Field(default_factory=list)
+    next_cursor: Optional[str] = None
+    total_nodes: int = 0
+    revision: int = 0
 
 
 # ---------------------------------------------------------------------------

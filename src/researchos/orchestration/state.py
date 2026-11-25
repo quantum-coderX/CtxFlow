@@ -74,6 +74,11 @@ class ResearchState(TypedDict, total=False):
     synthesis_data: Dict[str, Any]
     synthesis_ok: bool
     synthesis_error: str
+    # -- durable CtxFlow memory context (greedy or Laya selected) ---------
+    previous_context_ids: List[str]
+    memory_context: List[Dict[str, Any]]
+    memory_context_ids: List[str]
+    memory_selector: str
 
 
 def now_ts() -> float:

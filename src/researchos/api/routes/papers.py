@@ -7,9 +7,9 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from ctxflow.models import NodeStatus
 from researchos.api.schemas import (
@@ -17,6 +17,7 @@ from researchos.api.schemas import (
     DemoSeedResponse,
     EdgeResponse,
     GraphDataResponse,
+    GraphPageResponse,
     GraphStatsResponse,
     NodeResponse,
     PaperIngestRequest,
@@ -312,6 +313,55 @@ async def graph_stats(project_id: str = "default") -> GraphStatsResponse:
     )
 
 
+def _node_response(node: Any) -> NodeResponse:
+    return NodeResponse(
+        id=node.id,
+        content=node.content[:500],
+        summary=node.summary,
+        node_type=node.node_type,
+        status=node.status if isinstance(node.status, str) else node.status.value,
+        tags=sorted(node.tags),
+        superseded_by=node.superseded_by,
+        metadata=node.metadata,
+        timestamp=node.timestamp,
+    )
+
+
+@router.get("/graph/page", response_model=GraphPageResponse)
+async def graph_page(
+    project_id: str = "default",
+    cursor: Optional[str] = None,
+    limit: int = Query(500, ge=1, le=2000),
+) -> GraphPageResponse:
+    """Return one bounded page of graph nodes; follow ``next_cursor`` for more.
+
+    Edges are those leaving the page's nodes; targets may be on a later page.
+    """
+    ctxflow = _resolve_ctxflow(project_id)
+    graph = ctxflow.graph
+    page, next_cursor = graph.page_nodes(after=cursor, limit=limit)
+    edges = [
+        EdgeResponse(
+            source_id=edge.source_id,
+            target_id=edge.target_id,
+            relation_type=edge.relation_type,
+            weight=edge.weight,
+            metadata=edge.metadata,
+            confidence=edge.confidence,
+            created_by=edge.created_by,
+        )
+        for node in page
+        for edge in graph.get_edges_from(node.id)
+    ]
+    return GraphPageResponse(
+        nodes=[_node_response(node) for node in page],
+        edges=edges,
+        next_cursor=next_cursor,
+        total_nodes=graph.node_count,
+        revision=get_graph_revision(project_id),
+    )
+
+
 @router.get("/graph/data", response_model=GraphDataResponse)
 async def graph_data(project_id: str = "default") -> GraphDataResponse:
     """Get full graph data for visualization."""
@@ -343,6 +393,8 @@ async def graph_data(project_id: str = "default") -> GraphDataResponse:
                 relation_type=edge.relation_type,
                 weight=edge.weight,
                 metadata=edge.metadata,
+                confidence=edge.confidence,
+                created_by=edge.created_by,
             ))
 
     return GraphDataResponse(nodes=nodes, edges=edges)

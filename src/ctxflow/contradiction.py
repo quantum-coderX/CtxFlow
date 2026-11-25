@@ -222,6 +222,7 @@ class ContradictionDetector:
             target_id=old_node_id,
             relation_type=result.relation,
             weight=result.confidence,
+            confidence=result.confidence,
             metadata={
                 "confidence": result.confidence,
                 "evidence": result.evidence,
@@ -239,7 +240,7 @@ class ContradictionDetector:
             elif result.relation == "contradicts":
                 old_node.status = NodeStatus.CONTESTED
         except Exception:
-            graph.remove_edge(new_node_id, old_node_id)
+            graph.remove_edge(new_node_id, old_node_id, result.relation)
             old_node.status = old_status
             old_node.superseded_by = old_superseded_by
             raise

@@ -18,7 +18,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 # ── Load .env before anything reads os.environ ────────────────────────────────
 try:
@@ -49,6 +49,9 @@ from researchos.api.routes import runs as runs_routes
 from researchos.api.graph_revision import bump_graph_revision
 from researchos.api.schemas import (
     HealthResponse,
+    MemoryEdgeResponse,
+    MemoryItemResponse,
+    MemoryPageResponse,
     ModelUsageResponse,
     RunResponse,
     SkillInfoResponse,
@@ -57,6 +60,7 @@ from researchos.api.schemas import (
 from researchos.gateway import ModelGateway, create_model_gateway
 from researchos.orchestration.research_tasks import ResearchLimits
 from researchos.orchestration.workflow import build_orchestrator
+from researchos.graph_backend import PostgresGraphBackend, graph_backend_choice
 from researchos.persistence import ResearchWorkspace, new_run_id
 from researchos.pipeline import make_router, redact_secrets
 from researchos.skills.graph_query import GraphQuerySkill
@@ -66,7 +70,14 @@ from researchos.skills.registry import SkillRegistry
 from researchos.skills.review_writer import ReviewWriterSkill
 from researchos.skills.source_fetch import SourceFetchSkill
 from researchos.skills.web_search import WebSearchSkill
-from researchos.memory.context import create_context_provider
+from researchos.memory.context import (
+    create_context_provider,
+    laya_tiering_enabled,
+    memory_enabled,
+)
+from ctxflow.laya_tiering import LayaTierAdvisor
+from ctxflow.memory.paging import PagedMemoryGraph
+from ctxflow.memory.store import StorageTier, storage_tier
 
 logger = logging.getLogger(__name__)
 
@@ -114,16 +125,43 @@ def create_app(
         nonlocal ctxflow, skill_registry, router_agent, workspace
 
         # 1a. Resolve the ResearchWorkspace (project-scoped persistence)
+        graph_backend = None
         if workspace is None:
-            workspace = ResearchWorkspace(injected_ctxflow=ctxflow)
+            if graph_backend_choice() == "postgres":
+                # Fail startup: silently falling back to JSON would split project graphs.
+                graph_backend = PostgresGraphBackend.start()
+            workspace = ResearchWorkspace(
+                injected_ctxflow=ctxflow, graph_backend=graph_backend
+            )
         state["workspace"] = workspace
 
         # 1b. Resolve the default CtxFlow (used for legacy /api/chat)
         if ctxflow is None:
             ctxflow = workspace.get_graph("default")
         state["ctxflow"] = ctxflow
-        if memory_store is not None:
-            provider = create_context_provider(memory_store)
+        active_memory_store = memory_store
+        memory_runtime = None
+        app.state.memory_status = "disabled"
+        if active_memory_store is not None:
+            app.state.memory_status = "injected"
+        elif memory_enabled():
+            # Created on this loop; the workflow reaches it via memory_loop.
+            try:
+                from ctxflow.memory.runtime import PostgresMemoryRuntime
+
+                memory_runtime = await PostgresMemoryRuntime.create()
+                active_memory_store = memory_runtime.store
+                app.state.memory_status = "runtime"
+            except Exception as exc:  # noqa: BLE001 — memory is optional; run without it
+                logger.error(
+                    "Durable memory enabled but runtime unavailable (%s: %s); "
+                    "continuing without memory.",
+                    type(exc).__name__, exc,
+                )
+                app.state.memory_status = f"unavailable: {type(exc).__name__}"
+        if active_memory_store is not None:
+            state["memory_store"] = active_memory_store
+            provider = create_context_provider(active_memory_store)
             if provider is not None:
                 state["context_provider"] = provider
                 app.state.context_provider = provider
@@ -363,6 +401,16 @@ def create_app(
             pass
         if owns_gateway and gateway is not None:
             gateway.close()
+        if memory_runtime is not None:
+            try:
+                await memory_runtime.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Memory runtime close failed: %s", exc)
+        if graph_backend is not None:
+            try:
+                graph_backend.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Graph backend close failed: %s", exc)
 
     app = FastAPI(
         title="ResearchOS API",
@@ -405,6 +453,70 @@ def create_app(
             model_enabled=gw is not None,
             model_provider=gw.config.provider if gw else None,
             model_id=gw.config.model_id if gw else None,
+        )
+
+    @app.get("/api/memory/page", response_model=MemoryPageResponse, tags=["memory"])
+    async def memory_page(
+        project_id: str = "default",
+        cursor: Optional[str] = None,
+        limit: int = Query(100, ge=1, le=500),
+        tier: Optional[str] = Query(None, pattern="^(hot|warm|cold)$"),
+        advise: bool = False,
+    ) -> MemoryPageResponse:
+        """One bounded page of durable project memory and its outgoing edges.
+
+        ``advise=true`` adds Laya tier proposals (requires ``LAYA_TIERING``).
+        """
+        store = state.get("memory_store")
+        if store is None or not hasattr(store, "list_page"):
+            raise HTTPException(status_code=503, detail="Durable memory is not enabled.")
+        advisor = None
+        if advise:
+            if not laya_tiering_enabled():
+                raise HTTPException(status_code=400, detail="Laya tiering is disabled (LAYA_TIERING).")
+            advisor = state.get("tier_advisor")
+            if advisor is None:
+                advisor = state["tier_advisor"] = LayaTierAdvisor()
+        graphs: Dict[str, PagedMemoryGraph] = state.setdefault("paged_graphs", {})
+        graph = graphs.setdefault(project_id, PagedMemoryGraph(store, project_id))
+        page = await graph.page(
+            cursor, tier=StorageTier(tier) if tier else None, limit=limit
+        )
+        proposals = (
+            {p.memory_id: p for p in advisor.propose(page.memories)} if advisor else {}
+        )
+        return MemoryPageResponse(
+            memories=[
+                MemoryItemResponse(
+                    id=item.id,
+                    text=item.text[:500],
+                    memory_type=item.memory_type.value,
+                    tier=item.tier.value,
+                    storage_tier=storage_tier(item).value,
+                    validity=item.validity.value,
+                    importance=item.importance,
+                    access_count=item.access_count,
+                    created_at=item.created_at.isoformat(),
+                    proposed_tier=(
+                        proposals[item.id].proposed_tier.value if item.id in proposals else None
+                    ),
+                    tier_reason=proposals[item.id].reason if item.id in proposals else None,
+                    tier_router=proposals[item.id].router if item.id in proposals else None,
+                )
+                for item in page.memories
+            ],
+            edges=[
+                MemoryEdgeResponse(
+                    src=edge.src,
+                    dst=edge.dst,
+                    relation=edge.relation.value,
+                    weight=edge.weight,
+                    confidence=edge.confidence,
+                    created_by=edge.created_by,
+                )
+                for edge in page.edges
+            ],
+            next_cursor=page.next_cursor,
         )
 
     @app.get("/api/skills", response_model=SkillListResponse, tags=["skills"])
@@ -484,6 +596,16 @@ def create_app(
         run_id = new_run_id()
         started_at = time.time()
         conversation_history = ws.conversation_history(project_id, session_id)
+        previous_context_ids: List[str] = []
+        try:
+            last_runs = ws.list_runs(project_id=project_id, limit=1, session_id=session_id)
+        except Exception:  # noqa: BLE001 — continuity is a hint, never a requirement
+            logger.warning("Could not load the previous run for memory continuity")
+            last_runs = []
+        if last_runs:
+            previous_context_ids = [
+                str(item) for item in last_runs[0].get("memory_context_ids") or []
+            ]
         try:
             ws.save_run(
                 {
@@ -509,6 +631,10 @@ def create_app(
             bump_graph_revision(project_id)
             ws.save_graph(project_id)
 
+        # Thread-safe event queue: workflow runs in a thread; SSE reads here
+        event_queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
         workflow = build_orchestrator(
             project_graph,
             literature_search=lit_search,
@@ -518,11 +644,9 @@ def create_app(
             web_search=web_search_skill,
             source_fetch=source_fetch_skill,
             limits=limits,
+            context_provider=state.get("context_provider"),
+            memory_loop=loop,
         )
-
-        # Thread-safe event queue: workflow runs in a thread; SSE reads here
-        event_queue: asyncio.Queue = asyncio.Queue()
-        loop = asyncio.get_running_loop()
 
         def on_event(ev: Dict[str, Any]) -> None:
             loop.call_soon_threadsafe(event_queue.put_nowait, ev)
@@ -541,6 +665,7 @@ def create_app(
                     token_budget=max(1, int(token_budget)),
                     on_event=on_event,
                     cancel_event=cancel_event,
+                    previous_context_ids=previous_context_ids,
                 )
             except Exception as exc:
                 logger.exception("Research workflow raised outside its failure handler")
@@ -642,6 +767,9 @@ def create_app(
                     "tasks": result.get("tasks", []),
                     "sources": result.get("sources", []),
                     "citations": result.get("citations", []),
+                    "memory_selector": result.get("memory_selector", ""),
+                    "memory_context_ids": result.get("memory_context_ids", []),
+                    "memory_context": result.get("memory_context", []),
                 })),
             }
 

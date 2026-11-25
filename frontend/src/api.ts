@@ -3,7 +3,9 @@
 import type {
   HealthResponse,
   GraphData,
+  GraphPage,
   GraphStats,
+  MemoryPage,
   ProjectMeta,
   RunRecord,
   TraceResponse,
@@ -104,5 +106,22 @@ export const api = {
         `/api/graph/data?project_id=${encodeURIComponent(project_id)}`,
         { cache: "no-store" }
       ),
+    page: (project_id: string, cursor: string | null, limit = GRAPH_PAGE_SIZE) =>
+      request<GraphPage>(
+        `/api/graph/page?project_id=${encodeURIComponent(project_id)}&limit=${limit}` +
+          (cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""),
+        { cache: "no-store" }
+      ),
+  },
+  memory: {
+    page: (project_id: string, cursor: string | null, tier: string | null, limit = 50) =>
+      request<MemoryPage>(
+        `/api/memory/page?project_id=${encodeURIComponent(project_id)}&limit=${limit}` +
+          (cursor ? `&cursor=${encodeURIComponent(cursor)}` : "") +
+          (tier ? `&tier=${tier}` : ""),
+        { cache: "no-store" }
+      ),
   },
 };
+
+export const GRAPH_PAGE_SIZE = 500;

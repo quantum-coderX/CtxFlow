@@ -12,7 +12,7 @@ import math
 import re
 from collections import deque
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Iterable, Protocol, Sequence
 from uuid import uuid4
@@ -167,6 +167,71 @@ class Subgraph:
 
     nodes: list[Memory]
     edges: list[Edge]
+
+
+class StorageTier(str, Enum):
+    """Paging temperature; distinct from the cognitive ``MemoryTier``."""
+
+    HOT = "hot"
+    WARM = "warm"
+    COLD = "cold"
+
+
+HOT_IMPORTANCE = 0.8
+HOT_WINDOW = timedelta(days=1)
+_COLD_VALIDITY = (ValidityState.SUPERSEDED, ValidityState.STALE)
+
+
+def storage_tier(
+    memory: Memory,
+    *,
+    now: datetime | None = None,
+    hot_window: timedelta = HOT_WINDOW,
+    hot_importance: float = HOT_IMPORTANCE,
+) -> StorageTier:
+    """Deterministic paging tier; the PostgreSQL ``list_page`` filter mirrors it."""
+
+    if memory.archived or memory.validity in _COLD_VALIDITY:
+        return StorageTier.COLD
+    current = now or _now()
+    if (
+        memory.tier is MemoryTier.WORKING
+        or memory.importance >= hot_importance
+        or memory.created_at >= current - hot_window
+    ):
+        return StorageTier.HOT
+    return StorageTier.WARM
+
+
+@dataclass(frozen=True)
+class MemoryPage:
+    """One keyset page of memories; ``next_cursor`` is ``None`` on the last page."""
+
+    memories: list[Memory]
+    next_cursor: str | None = None
+
+
+class PagedMemoryStore(Protocol):
+    """Optional paged-read capability; not required by ``MemoryStore``."""
+
+    async def list_page(
+        self,
+        *,
+        project_id: str = "default",
+        cursor: str | None = None,
+        limit: int = 100,
+        tier: StorageTier | None = None,
+        types: Iterable[MemoryType] | None = None,
+        now: datetime | None = None,
+    ) -> MemoryPage: ...
+
+    async def edges_for(
+        self,
+        memory_ids: Sequence[str],
+        *,
+        project_id: str = "default",
+        direction: str = "out",
+    ) -> list[Edge]: ...
 
 
 class MemoryStore(Protocol):

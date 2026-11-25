@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { api } from "../api";
-import type { GraphData, GraphNode } from "../types";
+import type { GraphData, GraphEdge, GraphNode, GraphPage } from "../types";
 import { useApp, useAppState } from "../store/AppContext";
 
 interface Point {
@@ -274,11 +274,28 @@ export function GraphPanel() {
         dispatch({ type: "SET_GRAPH_STATS", payload: stats });
         const changed = force || stats.revision !== lastRevision;
         if (changed) {
-          const nextGraph = await api.graph.data(projectId);
-          if (!active) return;
-          loadedProjectRef.current = projectId;
-          setGraph(nextGraph);
-          setPositions((previous) => layoutGraph(nextGraph, previous));
+          // Load page by page; a revision change mid-load restarts on the next poll.
+          const nodes: GraphNode[] = [];
+          const edges: GraphEdge[] = [];
+          let cursor: string | null = null;
+          do {
+            const page: GraphPage = await api.graph.page(projectId, cursor);
+            if (!active) return;
+            nodes.push(...page.nodes);
+            edges.push(...page.edges);
+            cursor = page.next_cursor;
+            const loaded = new Set(nodes.map((node) => node.id));
+            const partial: GraphData = {
+              nodes: [...nodes],
+              edges: edges.filter(
+                (edge) => loaded.has(edge.source_id) && loaded.has(edge.target_id)
+              ),
+            };
+            loadedProjectRef.current = projectId;
+            setGraph(partial);
+            setPositions((previous) => layoutGraph(partial, previous));
+            setLoading(false);
+          } while (cursor);
           setLastUpdated(Date.now());
         }
         lastRevision = stats.revision;

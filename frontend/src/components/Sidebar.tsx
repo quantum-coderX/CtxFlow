@@ -102,6 +102,13 @@ function LibraryPanel() {
       }} />
 
       <div className="library-section-head" style={{ marginTop: 16 }}>
+        <span className="section-label">Upload PDF</span>
+      </div>
+      <PdfUploadForm projectId={state.currentProjectId} onSuccess={() => {
+        api.health().then((h) => dispatch({ type: "SET_HEALTH", payload: h })).catch(() => {});
+      }} />
+
+      <div className="library-section-head" style={{ marginTop: 16 }}>
         <span className="section-label">Add note</span>
       </div>
       <NoteForm projectId={state.currentProjectId} />
@@ -146,6 +153,71 @@ function PaperForm({ projectId, onSuccess }: { projectId: string; onSuccess: () 
           <input placeholder="Authors (comma separated)" value={authors} onChange={(e) => setAuthors(e.target.value)} />
           <textarea placeholder="Abstract or key findings *" value={abstract} onChange={(e) => setAbstract(e.target.value)} rows={3} required />
           <button type="submit" className="btn btn-primary btn-sm" disabled={loading}>{loading ? "Ingesting…" : "Ingest paper"}</button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function PdfUploadForm({ projectId, onSuccess }: { projectId: string; onSuccess: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    setLoading(true);
+    try {
+      const data = new FormData(form);
+      const result = await api.papers.uploadForm(data);
+      toast(`Ingested PDF: ${result.claim_node_ids.length} claims`, "good");
+      form.reset();
+      setTitle("");
+      setOpen(false);
+      onSuccess();
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "PDF upload failed", "bad");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="collapsible">
+      <button
+        className="collapsible-trigger"
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" style={{ width: 14, height: 14, transform: open ? "rotate(90deg)" : "none", transition: "transform 200ms" }}>
+          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+        </svg>
+        Choose PDF to upload
+      </button>
+      {open && (
+        <form className="ingest-form" onSubmit={submit}>
+          <input type="hidden" name="project_id" value={projectId} />
+          <label className="field-label" htmlFor="paper-pdf-file">PDF file *</label>
+          <input
+            id="paper-pdf-file"
+            name="file"
+            type="file"
+            accept=".pdf,application/pdf"
+            required
+          />
+          <label className="field-label" htmlFor="paper-pdf-title">Title (optional)</label>
+          <input
+            id="paper-pdf-title"
+            name="title"
+            placeholder="Use the title from the PDF if blank"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <button type="submit" className="btn btn-primary btn-sm" disabled={loading}>
+            {loading ? "Uploading…" : "Upload PDF"}
+          </button>
         </form>
       )}
     </div>

@@ -31,13 +31,15 @@ researchos = [
 orchestration = ["langgraph>=1.0"]
 mcp = ["mcp>=1.0"]
 web = ["ddgs>=9.0"]
+# System-1 context selector (pulls in torch/transformers; requires Python 3.10+)
+laya = ["laya>=0.5; python_version >= '3.10'"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-asyncio>=0.23",
 ]
 all = [
-    "ctxflow[nlp,binary,llm,local-embeddings,researchos,orchestration,mcp,web,dev]",
+    "ctxflow[nlp,binary,llm,local-embeddings,researchos,orchestration,mcp,web,laya,dev]",
     "spacy>=3.0",
     "msgpack>=1.0",
     "fastapi>=0.110",
@@ -62,7 +64,7 @@ where = ["src"]
 include = ["ctxflow*", "researchos*"]
 
 [tool.setuptools.package-data]
-researchos = ["web/*.html", "web/*.css", "web/*.js", "demo/*.json"]
+researchos = ["web/*.html", "web/*.css", "web/*.js", "web/assets/*", "demo/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

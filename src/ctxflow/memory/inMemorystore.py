@@ -12,13 +12,16 @@ from typing import Iterable, Sequence
 from ctxflow.memory.store import (
     Edge,
     Memory,
+    MemoryPage,
     MemoryType,
     MemoryVersion,
     Provenance,
     Relation,
     ScoredId,
+    StorageTier,
     Subgraph,
     _now,
+    storage_tier,
 )
 from ctxflow.memory.run_events import RunEvent, event_hash, verify_event_chain
 
@@ -236,6 +239,67 @@ class InMemoryMemoryStore:
         ):
             return []
         return list(self.versions.get(memory_id, []))
+
+    async def list_page(
+        self,
+        *,
+        project_id: str = "default",
+        cursor: str | None = None,
+        limit: int = 100,
+        tier: StorageTier | None = None,
+        types: Iterable[MemoryType] | None = None,
+        now: datetime | None = None,
+    ) -> MemoryPage:
+        """Keyset page of one project's memories ordered by id."""
+
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        allowed_types = set(types) if types is not None else None
+        current = now or _now()
+        matching = sorted(
+            (
+                memory for memory in self.memories.values()
+                if memory.project_id == project_id
+                and (cursor is None or memory.id > cursor)
+                and (allowed_types is None or memory.memory_type in allowed_types)
+                and (tier is None or storage_tier(memory, now=current) is tier)
+            ),
+            key=lambda memory: memory.id,
+        )
+        page = matching[:limit]
+        next_cursor = page[-1].id if len(matching) > limit else None
+        return MemoryPage(
+            [replace(item, embedding=list(item.embedding)) for item in page],
+            next_cursor,
+        )
+
+    async def edges_for(
+        self,
+        memory_ids: Sequence[str],
+        *,
+        project_id: str = "default",
+        direction: str = "out",
+    ) -> list[Edge]:
+        """Edges leaving, entering, or touching *memory_ids* within one project."""
+
+        if direction not in {"both", "in", "out"}:
+            raise ValueError("direction must be 'both', 'in', or 'out'")
+        wanted = set(memory_ids)
+
+        def in_project(memory_id: str) -> bool:
+            memory = self.memories.get(memory_id)
+            return memory is not None and memory.project_id == project_id
+
+        selected = [
+            edge for edge in self.edges.values()
+            if in_project(edge.src) and in_project(edge.dst)
+            and (
+                (direction in {"both", "out"} and edge.src in wanted)
+                or (direction in {"both", "in"} and edge.dst in wanted)
+            )
+        ]
+        selected.sort(key=lambda edge: (edge.src, edge.dst, edge.relation.value))
+        return selected
 
     async def record_access(self, memory_id: str) -> None:
         """Record a deduplication hit on the canonical memory."""

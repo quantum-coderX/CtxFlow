@@ -4,13 +4,14 @@ import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
 import { ChatPanel } from "./components/ChatPanel";
 import { GraphPanel } from "./components/GraphPanel";
+import { MemoryPanel } from "./components/MemoryPanel";
 import { TracePanel } from "./components/TracePanel";
 import { ToastContainer } from "./components/Sidebar";
 import { useInit } from "./hooks/useInit";
 
 function Inner() {
   useInit();
-  const [activeView, setActiveView] = useState<"graph" | "chat">("graph");
+  const [activeView, setActiveView] = useState<"graph" | "memory" | "chat">("graph");
   return (
     <>
       <TopBar />
@@ -33,6 +34,16 @@ function Inner() {
               Graph
             </button>
             <button
+              id="memory-view-tab"
+              className={`main-tab ${activeView === "memory" ? "active" : ""}`}
+              role="tab"
+              aria-selected={activeView === "memory"}
+              aria-controls="memory-view-panel"
+              onClick={() => setActiveView("memory")}
+            >
+              Memory
+            </button>
+            <button
               id="chat-view-tab"
               className={`main-tab ${activeView === "chat" ? "active" : ""}`}
               role="tab"
@@ -46,7 +57,11 @@ function Inner() {
               Research chat
             </button>
             <span className="main-tab-hint">
-              {activeView === "graph" ? "Explore project knowledge" : "Ask questions and inspect evidence"}
+              {activeView === "graph"
+                ? "Explore project knowledge"
+                : activeView === "memory"
+                  ? "Browse durable memory by tier"
+                  : "Ask questions and inspect evidence"}
             </span>
           </nav>
           <div className="main-view-stack">
@@ -58,6 +73,15 @@ function Inner() {
               hidden={activeView !== "graph"}
             >
               <GraphPanel />
+            </div>
+            <div
+              id="memory-view-panel"
+              className="main-view-slot"
+              role="tabpanel"
+              aria-labelledby="memory-view-tab"
+              hidden={activeView !== "memory"}
+            >
+              <MemoryPanel />
             </div>
             <div
               id="chat-view-panel"

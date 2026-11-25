@@ -90,8 +90,10 @@ class Edge:
         weight: Strength of the relationship (0–1), typically Jaccard similarity
                 for auto-linked edges.
         timestamp: Creation time (seconds since epoch).
-        metadata: Arbitrary key-value pairs (e.g. ``{"confidence": 0.85,
-            "evidence": "..."}`` for contradiction edges).
+        metadata: Arbitrary key-value pairs (e.g. ``{"evidence": "..."}`` for
+            contradiction edges).
+        confidence: Confidence (0–1) that the relation holds.
+        created_by: Origin of the edge (``"rule"``, ``"llm"``, ``"laya"``, ``"user"``).
     """
 
     source_id: str
@@ -100,6 +102,8 @@ class Edge:
     weight: float = 1.0
     timestamp: float = field(default_factory=_now)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    confidence: float = 1.0
+    created_by: str = "rule"
 
 
 # ---------------------------------------------------------------------------

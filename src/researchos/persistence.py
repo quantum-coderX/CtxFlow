@@ -1,11 +1,10 @@
 """Project-scoped research memory persistence.
 
 ResearchOS keeps the **CtxFlow graph** as the single source of truth for
-papers, claims, and edges. PostgreSQL/`ctxflow.memory` is a parallel event
-store and is **not** used as the research graph backend.
-
-Each project is a separate CtxFlow graph serialized with the existing JSON
-export/import path so a process restart reloads the same node IDs.
+papers, claims, and edges. Each project is a separate CtxFlow graph, persisted
+either as JSON files (default) or, with a ``graph_backend`` such as
+``RESEARCHOS_GRAPH_BACKEND=postgres``, in the ``project_graph_*`` tables. The
+``ctxflow.memory`` tables remain a separate durable-memory store.
 """
 
 from __future__ import annotations
@@ -83,9 +82,11 @@ class ResearchWorkspace:
         *,
         injected_ctxflow: Optional[CtxFlow] = None,
         persist: Optional[bool] = None,
+        graph_backend: Optional[Any] = None,
     ) -> None:
         self.data_dir = Path(data_dir) if data_dir is not None else data_dir_from_env()
         self._injected = injected_ctxflow
+        self._graph_backend = graph_backend
         self.persist = bool(persist) if persist is not None else injected_ctxflow is None
         self._lock = threading.RLock()
         self._graphs: Dict[str, CtxFlow] = {}
@@ -110,6 +111,8 @@ class ResearchWorkspace:
     def backend(self) -> str:
         if not self.persist:
             return "memory"
+        if self._graph_backend is not None:
+            return str(self._graph_backend.name)
         return "ctxflow-json"
 
     def _project_dir(self, project_id: str) -> Path:
@@ -178,7 +181,21 @@ class ResearchWorkspace:
                 return cached
             graph = CtxFlow()
             path = self._graph_path(project_id)
-            if self.persist and path.exists():
+            backend = self._graph_backend if self.persist else None
+            if backend is not None:
+                # A failed load must raise: an empty graph here would later overwrite the stored one.
+                stored = backend.load(project_id)
+                if stored is not None:
+                    graph.load_graph(stored)
+                elif path.exists():
+                    try:
+                        graph.import_(str(path), format="json")
+                    except Exception as exc:  # noqa: BLE001 — corrupt legacy file
+                        logger.error("Failed to import legacy graph for %s: %s", project_id, exc)
+                        graph = CtxFlow()
+                    else:
+                        backend.save(project_id, graph.graph)
+            elif self.persist and path.exists():
                 try:
                     graph.import_(str(path), format="json")
                 except Exception as exc:  # noqa: BLE001 — corrupt file must not crash startup
@@ -206,7 +223,10 @@ class ResearchWorkspace:
                 return
             folder = self._project_dir(project_id)
             folder.mkdir(parents=True, exist_ok=True)
-            graph.export(str(self._graph_path(project_id)), format="json")
+            if self._graph_backend is not None:
+                self._graph_backend.save(project_id, graph.graph)
+            else:
+                graph.export(str(self._graph_path(project_id)), format="json")
             meta = self._meta.get(project_id)
             if meta is not None:
                 meta.updated_at = time.time()

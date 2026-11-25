@@ -174,6 +174,42 @@ export interface GraphData {
   edges: GraphEdge[];
 }
 
+export interface GraphPage extends GraphData {
+  next_cursor: string | null;
+  total_nodes: number;
+  revision: number;
+}
+
+export interface MemoryItem {
+  id: string;
+  text: string;
+  memory_type: string;
+  tier: string;
+  storage_tier: string;
+  validity: string;
+  importance: number;
+  access_count: number;
+  created_at: string;
+  proposed_tier?: string | null;
+  tier_reason?: string | null;
+  tier_router?: string | null;
+}
+
+export interface MemoryPage {
+  memories: MemoryItem[];
+  edges: {
+    src: string;
+    dst: string;
+    relation: string;
+    weight: number;
+    confidence: number;
+    created_by: string;
+  }[];
+  next_cursor: string | null;
+}
+
+export type MemoryTierFilter = "all" | "hot" | "warm" | "cold";
+
 export interface GraphStats {
   total_nodes: number;
   total_edges: number;

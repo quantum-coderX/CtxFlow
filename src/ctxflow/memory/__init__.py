@@ -3,17 +3,22 @@
 from ctxflow.memory.store import (
     Edge,
     Memory,
+    MemoryPage,
     MemoryStore,
     MemoryTier,
     MemoryType,
     MemoryVersion,
+    PagedMemoryStore,
     Provenance,
     Relation,
     ScoredId,
     SourceType,
+    StorageTier,
     Subgraph,
     ValidityState,
+    storage_tier,
 )
+from ctxflow.memory.paging import GraphPage, PagedMemoryGraph, PageCacheStats
 from ctxflow.memory.inMemorystore import InMemoryMemoryStore
 from ctxflow.memory.embeddings import (
     BGE_EMBEDDING_DIMENSION,
@@ -49,6 +54,13 @@ from ctxflow.extraction_cache import ExtractionCache, InMemoryExtractionCache, e
 from ctxflow.memory.importance import ImportanceWeights, score_importance
 
 __all__ = [
+    "GraphPage",
+    "MemoryPage",
+    "PageCacheStats",
+    "PagedMemoryGraph",
+    "PagedMemoryStore",
+    "StorageTier",
+    "storage_tier",
     "Edge",
     "InMemoryMemoryStore",
     "Memory",
