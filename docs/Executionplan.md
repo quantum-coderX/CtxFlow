@@ -76,7 +76,10 @@ provider, restore, or production deployment was exercised.
 | Degraded memory | Memory lookup failure adds an alert and allows the research run to continue. | Keep degraded status visible to clients and operators; do not silently interpret it as a successful memory lookup. |
 | Evidence and reasoning | The workflow packs graph/evidence context, calls structured synthesis, verifies citations, and exposes result/event fields. Memory is additional background, not a citable source. | Measure citation support and source coverage on a fixed evaluation set. |
 | Acquisition | Literature search, arXiv MCP with HTTP fallback, web search, source fetching, paper reading, and a checked-in demo corpus exist. | Provider outages, licensing, source-version provenance, and ingestion quality need explicit release checks. |
-| Vision scope | [`read.md`](read.md) describes the full workstation: claim-level evidence, analytics, visualization, artifacts, and independent workspaces. | Acquisition (arXiv, Semantic Scholar, OpenAlex, web, PyMuPDF) exists. No analytics, visualization, LaTeX/document, GROBID/Docling, or Crossref code exists; these are planned in P5-P8. |
+| Tool harness | `SkillRegistry` validates typed skill inputs; `ToolHarness` validates a bounded task DAG, runs independent registered skills concurrently, passes outputs only through declared references, and records completed/failed/blocked outcomes. The workstation engines below are registered as allowlisted skills, so a plan such as ingest → analyze → chart → compose runs through the harness. | This is an internal execution seam; it is not exposed as an arbitrary-plan HTTP API. No model-supplied code is evaluated. |
+| Workstation engines | `researchos.workstation.Workstation` bundles: versioned datasets (`analytics.py`), a fixed 13-operation statistics catalog and 9 validated transforms, `create_chart(spec)` (`charts.py`), a project source registry with stable BibTeX keys (`sources.py`), document specs → Markdown/HTML/LaTeX/BibTeX with isolated Tectonic/pdflatex compilation, staleness and refresh-rebuild (`artifacts.py`), stored PDFs with page-located text/OCR (`ocr.py`), and a bounded Lean adapter (`proof.py`). REST routes live in `api/routes/datasets.py` and `api/routes/artifacts.py`; the UI has Data and Reports tabs. | XLSX/Parquet need `openpyxl`/`pyarrow`; PDF needs Tectonic or pdflatex; OCR needs Tesseract or Nougat; proof checking needs Lean. Missing tools report `unavailable`. GROBID/Docling, Crossref, DuckDB SQL, Plotly and Pandoc DOCX are not implemented. Lean and Nougat adapters are tested with stubbed subprocesses only. |
+| Vision scope | [`read.md`](read.md) describes the full workstation: claim-level evidence, analytics, visualization, artifacts, and independent workspaces. | See the P5-P8 progress notes below for what is implemented and what remains. |
+| Laya role | Laya can be selected behind `LAYA_CONTEXT_SELECTION` for memory-context decisions; greedy selection remains the default. | The learned model has not been evaluated on labeled ResearchOS tasks. The current adapter does not establish a general coordinator/router or a correctness judge; keep orchestration deterministic and use Laya only for validated structured decisions until measured. |
 
 ### Planning/documentation conflicts to resolve
 
@@ -397,6 +400,17 @@ Do not begin P5 onward until this slice is trustworthy.
 with page references; parser failure is a visible `partial`/`error` and never an
 empty success; extraction quality is measured on a labeled sample.
 
+**Progress (partial):** `sources.py` keeps a per-project registry derived from
+the graph: stable identity (DOI > arXiv > URL > node), content hash and version
+history, access level (`metadata_only`/`abstract`/`full_text`), license note and
+a citation key that never changes once assigned. `ocr.py` stores uploaded PDFs
+immutably (sha256) and extracts page-located text via the PyMuPDF text layer,
+Tesseract (through PyMuPDF) or the Nougat CLI; blank/scanned pages make the
+result `partial`, a missing engine is `unavailable`. CSV/TSV/JSON/XLSX/Parquet go
+to the dataset registry (P7). Not done: GROBID/Docling sections, references and
+tables; Crossref/DOI resolution and cross-provider deduplication; HTML/DOCX
+ingestion; a labeled extraction-quality sample.
+
 ### P6 — Artifact and LaTeX engine
 
 **Goal:** Turn workspace evidence into publication-ready documents.
@@ -426,6 +440,26 @@ all citations resolved; an unresolved citation fails the build; hostile input
 (LaTeX injection strings in titles/claims) is escaped; rebuilding from the same
 spec is reproducible.
 
+**Progress:** implemented in `artifacts.py`. `DocumentSpec` (paragraph, list,
+claim, table, analysis summary, figure, equation blocks) is validated before
+rendering; `[@id]` markers and `citations` must resolve to a project source or a
+claim extracted from one, otherwise the build is `error` and no output is
+written. A Jinja2 template with custom delimiters auto-escapes every value unless
+explicitly marked safe; equations pass a command allowlist. Markdown, self-
+contained HTML (CSP, served as attachment), LaTeX and BibTeX are always
+produced; PDF runs Tectonic (`--untrusted`) or pdflatex (`-no-shell-escape`,
+`openout_any=p`) in a deadline-bounded subprocess with secrets removed from the
+environment. Build records hold spec hash, template/engine versions, generator
+names and every source/claim/analysis/chart/dataset version used.
+`compose_report_spec` builds a literature review/technical report deterministically
+from workspace evidence; optional System 2 prose is kept only if every `[@id]` it
+cites is in the supplied evidence. Tests cover escaping, unresolved citations,
+reproducible `.tex`, and missing/failed/successful compilers (stubbed). A real
+Tectonic 0.17.0 build of a composed review (hostile title/claim text, table,
+figure, equation, bibliography) produced a 2-page PDF locally on 27 Nov 2026; the
+first run needs network access to fetch the TeX bundle. Not done: Pandoc DOCX,
+XLSX table export, and a Tectonic build in CI.
+
 ### P7 — Analytics and visualization
 
 **Goal:** Real computation on real datasets, reproducibly.
@@ -449,6 +483,21 @@ spec is reproducible.
 chart; re-running with the same dataset version and parameters gives identical
 numbers; numeric correctness is tested against reference values.
 
+**Progress:** implemented in `analytics.py` and `charts.py`. Uploads are size-
+and format-checked, hashed, parsed with deterministic type inference (or explicit
+`column_types`), profiled, and stored as immutable versions; identical uploads
+reuse the version. Nine validated transforms (select, rename, filter, drop/fill
+missing, sort, deduplicate, cast, join) create derived versions with recorded
+lineage. The catalog has 13 operations (describe, missing summary, value counts,
+group aggregate, correlation, CI, t-tests, Mann-Whitney, chi-square, Shapiro-Wilk,
+OLS regression, one-way ANOVA, time-series summary), each with a strict pydantic
+parameter schema; analysis ids hash dataset version + operation + parameters, and
+results record warnings and numpy/scipy versions. Tests check textbook reference
+values and identical re-runs. Charts (line, bar, scatter, histogram, box,
+correlation heatmap) render with matplotlib to PNG and deterministic SVG and
+store the exact plotted data. Not done: DuckDB SQL query path, Parquet storage
+(tables are stored as typed JSON), Plotly interactive output.
+
 ### P8 — Persistent research workspaces
 
 **Goal:** Multiple independent projects as the central user-facing abstraction.
@@ -467,6 +516,18 @@ numbers; numeric correctness is tested against reference values.
 **Exit gate:** two independent projects run end to end without context or
 provenance mixing; changing a source marks the right artifacts stale; a stale
 report rebuilds from current evidence.
+
+**Progress (partial):** all engine data is stored under
+`<data_dir>/projects/<project_id>/` and every lookup is project-scoped (tested
+for datasets over HTTP). Artifacts are versioned per build; `staleness` reports
+changed/removed sources and claims, newer dataset versions and missing
+analyses/charts, and `build(refresh_inputs=True)` re-runs the same analyses and
+charts on the latest dataset versions before rebuilding. A bounded Lean adapter
+(`proof.py`) screens out code-executing commands and reports
+`verified`/`failed`/`rejected`/`unavailable` with axioms and diagnostics. Not
+done: objectives/milestones/decision history in the project record,
+cross-workspace retrieval policy, workspace-level export, and an end-to-end
+objective -> report workflow in the research graph.
 
 ## 6. Cross-cutting acceptance criteria
 

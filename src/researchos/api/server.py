@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -41,7 +42,9 @@ from researchos.agents.retriever import RetrieverAgent
 from researchos.agents.router import SkillRouter
 from researchos.agents.synthesizer import SynthesizerAgent
 from researchos.agents.trace import TraceAgent
+from researchos.api.routes import artifacts as artifacts_routes
 from researchos.api.routes import chat as chat_routes
+from researchos.api.routes import datasets as datasets_routes
 from researchos.api.routes import notes as notes_routes
 from researchos.api.routes import papers as papers_routes
 from researchos.api.routes import projects as projects_routes
@@ -58,6 +61,8 @@ from researchos.api.schemas import (
     SkillListResponse,
 )
 from researchos.gateway import ModelGateway, create_model_gateway
+from researchos.harness import ToolHarness
+from researchos.workstation import Workstation
 from researchos.orchestration.research_tasks import ResearchLimits
 from researchos.orchestration.workflow import build_orchestrator
 from researchos.graph_backend import PostgresGraphBackend, graph_backend_choice
@@ -93,6 +98,7 @@ def create_app(
     enable_cors: bool = True,
     model_gateway: Optional[ModelGateway] = None,
     workspace: Optional[ResearchWorkspace] = None,
+    workstation: Optional[Workstation] = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -115,6 +121,10 @@ def create_app(
         truthy; otherwise no model is wired.
     workspace : ResearchWorkspace | None
         Injected workspace (tests). If None, created from env / data dir.
+    workstation : Workstation | None
+        Injected dataset/analysis/chart/artifact engines. If None, engines
+        store under the workspace data dir, or a temporary directory removed
+        at shutdown when the workspace is not persistent.
     """
 
     # Shared state container
@@ -122,7 +132,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal ctxflow, skill_registry, router_agent, workspace
+        nonlocal ctxflow, skill_registry, router_agent, workspace, workstation
 
         # 1a. Resolve the ResearchWorkspace (project-scoped persistence)
         graph_backend = None
@@ -349,6 +359,23 @@ def create_app(
             )
         state["skill_registry"] = skill_registry
 
+        # 3b. Workstation engines (datasets, analytics, charts, artifacts,
+        #     documents/OCR, proofs) registered as allowlisted skills.
+        workstation_tempdir = None
+        if workstation is None:
+            if workspace.persist:
+                workstation_root = Path(workspace.data_dir)
+            else:
+                workstation_tempdir = tempfile.TemporaryDirectory(prefix="researchos-workstation-")
+                workstation_root = Path(workstation_tempdir.name)
+            workstation = Workstation(workstation_root)
+        workstation.register_skills(skill_registry, graph_for=workspace.get_graph, llm=llm)
+        state["workstation"] = workstation
+        app.state.workstation = workstation
+
+        tool_harness = ToolHarness(skill_registry)
+        state["tool_harness"] = tool_harness
+
         # 4. Initialize Multi-Agent Pipeline (legacy /api/chat path)
         if router_agent is None:
             retriever = RetrieverAgent(
@@ -376,6 +403,7 @@ def create_app(
         # Expose the wired objects on app.state for tests and embedders.
         app.state.ctxflow = ctxflow
         app.state.skill_registry = skill_registry
+        app.state.tool_harness = tool_harness
         app.state.router = router_agent
         app.state.model_gateway = gateway
         app.state.workspace = workspace
@@ -386,10 +414,14 @@ def create_app(
         notes_routes.set_app_state(state)
         projects_routes.set_app_state(state)
         runs_routes.set_app_state(state)
+        datasets_routes.set_app_state(state)
+        artifacts_routes.set_app_state(state)
 
         yield
 
         # Teardown
+        if workstation_tempdir is not None:
+            workstation_tempdir.cleanup()
         try:
             lit_search.close()
         except Exception:
@@ -435,6 +467,8 @@ def create_app(
     app.include_router(notes_routes.router)
     app.include_router(projects_routes.router)
     app.include_router(runs_routes.router)
+    app.include_router(datasets_routes.router)
+    app.include_router(artifacts_routes.router)
 
     # Root & Health Endpoints
     @app.get("/health", response_model=HealthResponse, tags=["system"])

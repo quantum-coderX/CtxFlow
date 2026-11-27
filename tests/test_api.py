@@ -37,6 +37,10 @@ class TestApiEndpoints:
         assert "literature_search" in skill_names
         assert "review_writer" in skill_names
 
+    def test_internal_tool_harness_uses_registered_skills(self, test_client):
+        app = test_client.app
+        assert app.state.tool_harness.registry is app.state.skill_registry
+
     def test_paper_ingest_and_graph_data(self, test_client):
         revision_before = test_client.get("/api/graph/stats").json()["revision"]
 

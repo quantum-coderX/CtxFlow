@@ -17,6 +17,15 @@ ALLOWED_TOOLS: FrozenSet[str] = frozenset(
         "pack_context",
         "web_search",
         "fetch_source",
+        "dataset_ingest",
+        "dataset_profile",
+        "dataset_transform",
+        "dataset_analyze",
+        "create_chart",
+        "proof_check",
+        "academic_ocr",
+        "document_compose",
+        "latex_compile",
     }
 )
 

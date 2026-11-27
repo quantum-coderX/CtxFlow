@@ -1,6 +1,15 @@
 // API client — thin wrappers over fetch
 
 import type {
+  AnalysisResult,
+  ArtifactRecord,
+  ArtifactSummary,
+  ChartRecord,
+  DatasetManifest,
+  DatasetVersion,
+  OperationInfo,
+  Staleness,
+  WorkstationCapabilities,
   HealthResponse,
   GraphData,
   GraphPage,
@@ -122,6 +131,72 @@ export const api = {
         { cache: "no-store" }
       ),
   },
+
+  workstation: {
+    capabilities: () => request<WorkstationCapabilities>("/api/workstation/capabilities"),
+    operations: () => request<{ operations: OperationInfo[] }>("/api/analytics/operations").then((d) => d.operations),
+  },
+
+  datasets: {
+    list: (project_id: string) =>
+      request<{ datasets: DatasetManifest[] }>(`/api/datasets?project_id=${q(project_id)}`, { cache: "no-store" })
+        .then((d) => d.datasets),
+    get: (project_id: string, dataset_id: string, version?: number) =>
+      request<{ dataset: DatasetManifest; version: DatasetVersion }>(
+        `/api/datasets/${q(dataset_id)}?project_id=${q(project_id)}` + (version ? `&version=${version}` : ""),
+        { cache: "no-store" }
+      ),
+    upload: (form: FormData) => request<DatasetVersion>("/api/datasets/upload", { method: "POST", body: form }),
+  },
+
+  analyses: {
+    run: (data: { project_id: string; dataset_id: string; operation: string; params: Record<string, unknown>; version?: number }) =>
+      post<AnalysisResult>("/api/analyses", data),
+    list: (project_id: string, dataset_id?: string) =>
+      request<{ analyses: AnalysisResult[] }>(
+        `/api/analyses?project_id=${q(project_id)}` + (dataset_id ? `&dataset_id=${q(dataset_id)}` : ""),
+        { cache: "no-store" }
+      ).then((d) => d.analyses),
+  },
+
+  charts: {
+    create: (project_id: string, spec: Record<string, unknown>) =>
+      post<ChartRecord>("/api/charts", { project_id, spec }),
+    list: (project_id: string, dataset_id?: string) =>
+      request<{ charts: ChartRecord[] }>(
+        `/api/charts?project_id=${q(project_id)}` + (dataset_id ? `&dataset_id=${q(dataset_id)}` : ""),
+        { cache: "no-store" }
+      ).then((d) => d.charts),
+    imageUrl: (project_id: string, chart_id: string, format: "png" | "svg" = "png") =>
+      `/api/charts/${q(chart_id)}/image?project_id=${q(project_id)}&format=${format}`,
+  },
+
+  artifacts: {
+    list: (project_id: string) =>
+      request<{ artifacts: ArtifactSummary[] }>(`/api/artifacts?project_id=${q(project_id)}`, { cache: "no-store" })
+        .then((d) => d.artifacts),
+    get: (project_id: string, artifact_id: string) =>
+      request<ArtifactRecord>(`/api/artifacts/${q(artifact_id)}?project_id=${q(project_id)}`, { cache: "no-store" }),
+    compose: (data: {
+      project_id: string; topic?: string; title?: string; template?: string;
+      analysis_ids?: string[]; chart_ids?: string[]; use_model?: boolean;
+    }) => post<ArtifactRecord>("/api/artifacts/compose", data),
+    build: (project_id: string, artifact_id: string, refresh_inputs = false) =>
+      post<ArtifactRecord>(`/api/artifacts/${q(artifact_id)}/build`, { project_id, refresh_inputs }),
+    staleness: (project_id: string, artifact_id: string) =>
+      request<Staleness>(`/api/artifacts/${q(artifact_id)}/staleness?project_id=${q(project_id)}`, { cache: "no-store" }),
+    fileUrl: (project_id: string, artifact_id: string, fmt: string, download = false) =>
+      `/api/artifacts/${q(artifact_id)}/files/${fmt}?project_id=${q(project_id)}` + (download ? "&download=true" : ""),
+    text: async (project_id: string, artifact_id: string, fmt: string) => {
+      const res = await fetch(api.artifacts.fileUrl(project_id, artifact_id, fmt), { cache: "no-store" });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.text();
+    },
+  },
 };
+
+function q(value: string): string {
+  return encodeURIComponent(value);
+}
 
 export const GRAPH_PAGE_SIZE = 500;

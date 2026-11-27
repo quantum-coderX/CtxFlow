@@ -299,7 +299,7 @@ class SkillRegistry:
 
     # -- Invocation ---------------------------------------------------------
 
-    def invoke(self, name: str, **kwargs: Any) -> SkillResult:
+    def invoke(self, name: str, /, **kwargs: Any) -> SkillResult:
         """Synchronously invoke a registered skill.
 
         Parameters
@@ -344,7 +344,7 @@ class SkillRegistry:
                 skill_name=name, success=False, error=str(exc)
             )
 
-    async def invoke_async(self, name: str, **kwargs: Any) -> SkillResult:
+    async def invoke_async(self, name: str, /, **kwargs: Any) -> SkillResult:
         """Asynchronously invoke a registered skill.
 
         Works for both sync and async skill functions.

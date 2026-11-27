@@ -255,3 +255,126 @@ export const WORKFLOW_STAGES = [
 ] as const;
 
 export type WorkflowStage = typeof WORKFLOW_STAGES[number];
+
+// ---------------------------------------------------------------------------
+// Workstation: datasets, analyses, charts, artifacts
+// ---------------------------------------------------------------------------
+
+export interface DatasetColumn {
+  name: string;
+  dtype: "integer" | "number" | "boolean" | "datetime" | "string";
+}
+
+export interface DatasetVersion {
+  dataset_id: string;
+  project_id: string;
+  name: string;
+  version: number;
+  content_hash: string;
+  row_count: number;
+  column_count: number;
+  schema: DatasetColumn[];
+  profile: {
+    row_count: number;
+    duplicate_rows: number;
+    columns: Array<Record<string, unknown> & { name: string; dtype: string; missing: number; missing_pct: number }>;
+  };
+  warnings: string[];
+  provenance: Record<string, unknown>;
+  reused?: boolean;
+}
+
+export interface DatasetManifest {
+  dataset_id: string;
+  name: string;
+  description: string;
+  latest_version: number;
+  versions: { version: number; content_hash: string; row_count: number; created_at: number }[];
+  updated_at: number;
+}
+
+export interface AnalysisTable {
+  name: string;
+  columns: string[];
+  rows: unknown[][];
+}
+
+export interface AnalysisResult {
+  analysis_id: string;
+  dataset: { dataset_id: string; version: number; content_hash: string };
+  operation: string;
+  params: Record<string, unknown>;
+  values: Record<string, unknown>;
+  tables: AnalysisTable[];
+  warnings: string[];
+  environment: Record<string, string>;
+  created_at: number;
+}
+
+export interface OperationInfo {
+  name: string;
+  description: string;
+  params_schema: Record<string, unknown>;
+}
+
+export interface ChartRecord {
+  chart_id: string;
+  spec: Record<string, unknown>;
+  dataset: { dataset_id: string; version: number };
+  analysis_id?: string | null;
+  warnings: string[];
+  created_at: number;
+}
+
+export interface ArtifactOutput {
+  status: "ok" | "error" | "unavailable" | "skipped";
+  file?: string;
+  error?: string | null;
+  log_excerpt?: string;
+}
+
+export interface ArtifactBuild {
+  version: number;
+  status: "ok" | "partial" | "error";
+  errors: string[];
+  warnings: string[];
+  outputs: Record<string, ArtifactOutput>;
+  refreshed: Record<string, string>;
+  cited_sources: string[];
+}
+
+export interface ArtifactRecord {
+  artifact_id: string;
+  title: string;
+  template: string;
+  status: string;
+  latest_version: number;
+  builds: ArtifactBuild[];
+  compose_warnings?: string[];
+}
+
+export interface ArtifactSummary {
+  artifact_id: string;
+  title: string;
+  template: string;
+  status: string;
+  latest_version: number;
+  updated_at: number;
+  outputs: Record<string, string>;
+}
+
+export interface Staleness {
+  artifact_id: string;
+  stale: boolean;
+  reasons: string[];
+  version: number | null;
+}
+
+export interface WorkstationCapabilities {
+  datasets: { formats: Record<string, boolean> };
+  analytics: { operations: string[] };
+  charts: { types: string[] };
+  artifacts: { templates: string[]; formats: Record<string, boolean>; latex_engine: string | null };
+  ocr: Record<string, boolean>;
+  proof: { available: boolean };
+}
